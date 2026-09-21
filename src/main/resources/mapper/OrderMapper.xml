@@ -46,4 +46,21 @@
         WHERE order_no = #{orderNo}
     </update>
 
+    <select id="selectTimeoutLocked" resultMap="BaseResultMap">
+        SELECT <include refid="BaseColumns"/>
+        FROM t_order
+        WHERE status = #{status}
+          AND created_at &lt; #{beforeTime}
+        ORDER BY id
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectByStatus" resultMap="BaseResultMap">
+        SELECT <include refid="BaseColumns"/>
+        FROM t_order
+        WHERE status = #{status}
+        ORDER BY id
+        LIMIT #{limit}
+    </select>
+
 </mapper>

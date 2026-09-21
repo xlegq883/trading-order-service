@@ -11,6 +11,7 @@ public enum ErrorCode {
     PARAM_INVALID(400, "参数校验失败"),
     NOT_FOUND(404, "资源不存在"),
     CONFLICT(409, "资源冲突"),
+    STOCK_INSUFFICIENT(422, "库存不足"),
     SERVER_ERROR(500, "服务器内部错误");
 
     private final int code;

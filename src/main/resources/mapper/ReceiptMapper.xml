@@ -8,18 +8,19 @@
         <result column="order_no" property="orderNo"/>
         <result column="upstream_no" property="upstreamNo"/>
         <result column="status" property="status"/>
+        <result column="amount" property="amount"/>
         <result column="payload" property="payload"/>
         <result column="created_at" property="createdAt"/>
     </resultMap>
 
     <insert id="insert" parameterType="com.fuzuyang.trading.infrastructure.persistence.entity.ReceiptDO"
             useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO t_receipt (order_no, upstream_no, status, payload, created_at)
-        VALUES (#{orderNo}, #{upstreamNo}, #{status}, #{payload}, #{createdAt})
+        INSERT INTO t_receipt (order_no, upstream_no, status, amount, payload, created_at)
+        VALUES (#{orderNo}, #{upstreamNo}, #{status}, #{amount}, #{payload}, #{createdAt})
     </insert>
 
     <select id="selectByOrderNo" resultMap="BaseResultMap">
-        SELECT id, order_no, upstream_no, status, payload, created_at
+        SELECT id, order_no, upstream_no, status, amount, payload, created_at
         FROM t_receipt
         WHERE order_no = #{orderNo}
     </select>

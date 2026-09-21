@@ -9,7 +9,7 @@ import lombok.Data;
 /**
  * 下单请求。
  *
- * <p>D3 只做参数校验与落单，幂等键由客户端提供但暂不做幂等处理（D4 再接入 Redis SETNX）。</p>
+ * <p>幂等键不放在请求体，而是通过请求头 {@code x-idempotency-key} 传递（见 OrderController）。</p>
  */
 @Data
 public class CreateOrderRequest {
@@ -25,8 +25,4 @@ public class CreateOrderRequest {
     @NotNull(message = "quantity 不能为空")
     @Positive(message = "quantity 必须大于 0")
     private Integer quantity;
-
-    @NotBlank(message = "idempotentKey 不能为空")
-    @Size(max = 64, message = "idempotentKey 长度不能超过 64")
-    private String idempotentKey;
 }

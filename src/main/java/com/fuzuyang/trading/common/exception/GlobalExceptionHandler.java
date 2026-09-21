@@ -5,9 +5,11 @@ import com.fuzuyang.trading.common.ErrorCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -37,6 +39,24 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public ApiResponse<Void> handleNotReadable(HttpMessageNotReadableException ex) {
         return ApiResponse.error(ErrorCode.PARAM_INVALID.getCode(), "请求体格式错误");
+    }
+
+    /** 缺少必需的请求头（如 x-idempotency-key）。 */
+    @ExceptionHandler(MissingRequestHeaderException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ApiResponse<Void> handleMissingHeader(MissingRequestHeaderException ex) {
+        return ApiResponse.error(ErrorCode.PARAM_INVALID.getCode(), "缺少请求头: " + ex.getHeaderName());
+    }
+
+    /** 业务异常：按业务码映射 HTTP 状态。 */
+    @ExceptionHandler(BusinessException.class)
+    public ResponseEntity<ApiResponse<Void>> handleBusiness(BusinessException ex) {
+        HttpStatus status = HttpStatus.resolve(ex.getCode());
+        if (status == null) {
+            status = HttpStatus.INTERNAL_SERVER_ERROR;
+        }
+        return ResponseEntity.status(status)
+                .body(ApiResponse.error(ex.getCode(), ex.getMessage()));
     }
 
     /** 兜底：未预期异常。 */

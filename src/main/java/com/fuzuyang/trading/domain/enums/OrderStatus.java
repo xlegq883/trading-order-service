@@ -34,4 +34,18 @@ public enum OrderStatus {
     public int getCode() {
         return code;
     }
+
+    /**
+     * 按状态码反查枚举。
+     *
+     * @throws IllegalArgumentException 状态码未知
+     */
+    public static OrderStatus of(int code) {
+        for (OrderStatus status : values()) {
+            if (status.code == code) {
+                return status;
+            }
+        }
+        throw new IllegalArgumentException("未知订单状态码: " + code);
+    }
 }

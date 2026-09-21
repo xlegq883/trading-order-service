@@ -9,6 +9,9 @@ spring:
       initialization-fail-timeout: -1
   kafka:
     bootstrap-servers: localhost:9092
+    listener:
+      # 测试不启动 Kafka 监听容器
+      auto-startup: false
 
 mybatis:
   mapper-locations: classpath:mapper/*.xml
@@ -19,3 +22,8 @@ mybatis:
 logging:
   level:
     com.fuzuyang.trading: info
+
+app:
+  outbox:
+    # 测试不启用后台投递，避免依赖 Kafka
+    relay-enabled: false

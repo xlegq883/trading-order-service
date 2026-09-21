@@ -16,12 +16,16 @@
         WHERE product_id = #{productId}
     </select>
 
-    <update id="deductWithVersion">
+    <select id="selectAll" resultMap="BaseResultMap">
+        SELECT product_id, total, available, version
+        FROM t_stock
+    </select>
+
+    <update id="deduct">
         UPDATE t_stock
         SET available = available - #{quantity},
             version   = version + 1
         WHERE product_id = #{productId}
-          AND version = #{version}
           AND available &gt;= #{quantity}
     </update>
 

@@ -7,11 +7,15 @@ spring:
     time-zone: Asia/Shanghai
     date-format: yyyy-MM-dd HH:mm:ss
   kafka:
-    # 占位配置：Kafka 未启动也不影响应用启动，投递逻辑属于 D6。
+    # Kafka 未启动也不影响应用启动；投递由 Outbox 后台任务负责，失败会重试。
     bootstrap-servers: localhost:9092
     producer:
+      acks: all
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        # broker 不可用时快速失败，避免阻塞投递调度线程
+        max.block.ms: 3000
     consumer:
       group-id: trading-order-service
       auto-offset-reset: earliest
@@ -35,3 +39,30 @@ mybatis:
 logging:
   level:
     com.fuzuyang.trading: info
+
+app:
+  stock:
+    # 订单停留在 STOCK_LOCKED 超过该时长即回补库存并置 FAILED
+    lock-timeout: PT15M
+    # 超时扫描间隔与单批条数
+    timeout-scan-interval-ms: 60000
+    timeout-scan-limit: 100
+  outbox:
+    topic: trading.order.events
+    partitions: 3
+    replication-factor: 1
+    # 是否启用后台投递任务（测试环境关闭）
+    relay-enabled: true
+    scan-interval-ms: 5000
+    batch-size: 100
+    send-timeout-ms: 3000
+    # 指数退避：min(base × 2^(retry-1), max-backoff)，达到 max-retries 置 FAILED
+    base-backoff: PT5S
+    max-backoff: PT5M
+    max-retries: 5
+  receipt:
+    # 超时无回执：CREATED 超过该时长且无回执即置 FAILED 并回补库存
+    timeout: PT15M
+    reconcile-interval-ms: 10000
+    timeout-interval-ms: 60000
+    scan-limit: 100

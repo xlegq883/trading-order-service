@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.fuzuyang.trading.infrastructure.persistence.mapper.ReconcileDiffMapper">
+
+    <resultMap id="BaseResultMap" type="com.fuzuyang.trading.infrastructure.persistence.entity.ReconcileDiffDO">
+        <id column="id" property="id"/>
+        <result column="order_no" property="orderNo"/>
+        <result column="diff_type" property="diffType"/>
+        <result column="detail" property="detail"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.fuzuyang.trading.infrastructure.persistence.entity.ReconcileDiffDO"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO t_reconcile_diff (order_no, diff_type, detail, created_at)
+        VALUES (#{orderNo}, #{diffType}, #{detail}, #{createdAt})
+    </insert>
+
+    <select id="selectByOrderNo" resultMap="BaseResultMap">
+        SELECT id, order_no, diff_type, detail, created_at
+        FROM t_reconcile_diff
+        WHERE order_no = #{orderNo}
+        ORDER BY id
+    </select>
+
+</mapper>

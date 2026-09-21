@@ -2,6 +2,7 @@ package com.fuzuyang.trading.infrastructure.persistence.entity;
 
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
@@ -21,6 +22,9 @@ public class ReceiptDO {
 
     /** 上游处理结果。 */
     private Integer status;
+
+    /** 上游金额（对账用）。 */
+    private BigDecimal amount;
 
     /** 原始回执（JSON 字符串）。 */
     private String payload;

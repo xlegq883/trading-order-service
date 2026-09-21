@@ -77,12 +77,29 @@ CREATE TABLE IF NOT EXISTS t_receipt
     order_no    VARCHAR(32)     NOT NULL COMMENT '订单号',
     upstream_no VARCHAR(64)     NOT NULL COMMENT '上游流水号',
     status      TINYINT         NOT NULL DEFAULT 0 COMMENT '上游处理结果',
+    amount      DECIMAL(18, 2)  NULL COMMENT '上游金额（对账用）',
     payload     JSON            NULL COMMENT '原始回执',
     created_at  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     PRIMARY KEY (id),
     UNIQUE KEY uk_receipt_order_no (order_no)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT ='上游回执表';
+
+-- ---------------------------------------------------------------------------
+-- 对账差异表
+-- idx_reconcile_order_no：按订单查询差异。
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS t_reconcile_diff
+(
+    id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+    order_no   VARCHAR(32)     NOT NULL COMMENT '订单号',
+    diff_type  VARCHAR(32)     NOT NULL COMMENT 'AMOUNT_MISMATCH / UPSTREAM_FAILED / RECEIPT_TIMEOUT / LATE_RECEIPT',
+    detail     VARCHAR(512)    NULL COMMENT '差异详情',
+    created_at DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    PRIMARY KEY (id),
+    KEY idx_reconcile_order_no (order_no)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COMMENT ='对账差异表';
 
 -- ---------------------------------------------------------------------------
 -- 库存种子数据（2 条）

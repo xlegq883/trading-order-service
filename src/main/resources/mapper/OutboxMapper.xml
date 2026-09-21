@@ -33,9 +33,25 @@
         LIMIT #{limit}
     </select>
 
+    <select id="selectByAggregateId" resultMap="BaseResultMap">
+        SELECT id, aggregate_type, aggregate_id, payload, status, retry_count, next_retry_at,
+               created_at, updated_at
+        FROM t_outbox
+        WHERE aggregate_id = #{aggregateId}
+        ORDER BY id
+    </select>
+
     <update id="markSent">
         UPDATE t_outbox
         SET status = 1, updated_at = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <update id="reschedule">
+        UPDATE t_outbox
+        SET retry_count = #{retryCount},
+            next_retry_at = #{nextRetryAt},
+            updated_at = NOW()
         WHERE id = #{id}
     </update>
 

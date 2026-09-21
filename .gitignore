@@ -1,0 +1,32 @@
+# 构建产物
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.project
+.classpath
+.factorypath
+
+# 日志与临时文件
+*.log
+logs/
+*.tmp
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# Spring Boot
+HELP.md
+spring-shell.log
+
+# 本地环境覆盖（如需保密）
+application-secret.yml

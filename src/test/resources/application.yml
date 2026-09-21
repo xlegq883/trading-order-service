@@ -1,0 +1,21 @@
+# 测试环境：使用 H2 内存库，避免依赖本机 MySQL/Redis/Kafka。
+spring:
+  datasource:
+    url: jdbc:h2:mem:trading;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+    hikari:
+      initialization-fail-timeout: -1
+  kafka:
+    bootstrap-servers: localhost:9092
+
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: com.fuzuyang.trading.infrastructure.persistence.entity
+  configuration:
+    map-underscore-to-camel-case: true
+
+logging:
+  level:
+    com.fuzuyang.trading: info

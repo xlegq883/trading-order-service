@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.fuzuyang.trading.infrastructure.persistence.mapper.OutboxMapper">
+
+    <resultMap id="BaseResultMap" type="com.fuzuyang.trading.infrastructure.persistence.entity.OutboxDO">
+        <id column="id" property="id"/>
+        <result column="aggregate_type" property="aggregateType"/>
+        <result column="aggregate_id" property="aggregateId"/>
+        <result column="payload" property="payload"/>
+        <result column="status" property="status"/>
+        <result column="retry_count" property="retryCount"/>
+        <result column="next_retry_at" property="nextRetryAt"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.fuzuyang.trading.infrastructure.persistence.entity.OutboxDO"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO t_outbox (aggregate_type, aggregate_id, payload, status, retry_count, next_retry_at,
+                              created_at, updated_at)
+        VALUES (#{aggregateType}, #{aggregateId}, #{payload}, #{status}, #{retryCount}, #{nextRetryAt},
+                #{createdAt}, #{updatedAt})
+    </insert>
+
+    <select id="selectPending" resultMap="BaseResultMap">
+        SELECT id, aggregate_type, aggregate_id, payload, status, retry_count, next_retry_at,
+               created_at, updated_at
+        FROM t_outbox
+        WHERE status = 0
+          AND next_retry_at &lt;= NOW()
+        ORDER BY id
+        LIMIT #{limit}
+    </select>
+
+    <update id="markSent">
+        UPDATE t_outbox
+        SET status = 1, updated_at = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <update id="markFailed">
+        UPDATE t_outbox
+        SET status = 2,
+            retry_count = #{retryCount},
+            next_retry_at = #{nextRetryAt},
+            updated_at = NOW()
+        WHERE id = #{id}
+    </update>
+
+</mapper>

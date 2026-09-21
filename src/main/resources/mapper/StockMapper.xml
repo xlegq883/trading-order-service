@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.fuzuyang.trading.infrastructure.persistence.mapper.StockMapper">
+
+    <resultMap id="BaseResultMap" type="com.fuzuyang.trading.infrastructure.persistence.entity.StockDO">
+        <id column="product_id" property="productId"/>
+        <result column="total" property="total"/>
+        <result column="available" property="available"/>
+        <result column="version" property="version"/>
+    </resultMap>
+
+    <select id="selectByProductId" resultMap="BaseResultMap">
+        SELECT product_id, total, available, version
+        FROM t_stock
+        WHERE product_id = #{productId}
+    </select>
+
+    <update id="deductWithVersion">
+        UPDATE t_stock
+        SET available = available - #{quantity},
+            version   = version + 1
+        WHERE product_id = #{productId}
+          AND version = #{version}
+          AND available &gt;= #{quantity}
+    </update>
+
+    <update id="restore">
+        UPDATE t_stock
+        SET available = available + #{quantity},
+            version   = version + 1
+        WHERE product_id = #{productId}
+    </update>
+
+</mapper>

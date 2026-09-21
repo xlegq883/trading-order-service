@@ -1,0 +1,37 @@
+spring:
+  application:
+    name: trading-order-service
+  profiles:
+    active: local
+  jackson:
+    time-zone: Asia/Shanghai
+    date-format: yyyy-MM-dd HH:mm:ss
+  kafka:
+    # 占位配置：Kafka 未启动也不影响应用启动，投递逻辑属于 D6。
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    consumer:
+      group-id: trading-order-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+server:
+  port: 8080
+  servlet:
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
+
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: com.fuzuyang.trading.infrastructure.persistence.entity
+  configuration:
+    map-underscore-to-camel-case: true
+
+logging:
+  level:
+    com.fuzuyang.trading: info

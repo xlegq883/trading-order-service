@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.fuzuyang.trading.infrastructure.persistence.mapper.OrderMapper">
+
+    <resultMap id="BaseResultMap" type="com.fuzuyang.trading.infrastructure.persistence.entity.OrderDO">
+        <id column="id" property="id"/>
+        <result column="order_no" property="orderNo"/>
+        <result column="user_id" property="userId"/>
+        <result column="product_id" property="productId"/>
+        <result column="quantity" property="quantity"/>
+        <result column="amount" property="amount"/>
+        <result column="status" property="status"/>
+        <result column="idempotent_key" property="idempotentKey"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <sql id="BaseColumns">
+        id, order_no, user_id, product_id, quantity, amount, status, idempotent_key, created_at, updated_at
+    </sql>
+
+    <insert id="insert" parameterType="com.fuzuyang.trading.infrastructure.persistence.entity.OrderDO"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO t_order (order_no, user_id, product_id, quantity, amount, status, idempotent_key,
+                             created_at, updated_at)
+        VALUES (#{orderNo}, #{userId}, #{productId}, #{quantity}, #{amount}, #{status}, #{idempotentKey},
+                #{createdAt}, #{updatedAt})
+    </insert>
+
+    <select id="selectByOrderNo" resultMap="BaseResultMap">
+        SELECT <include refid="BaseColumns"/>
+        FROM t_order
+        WHERE order_no = #{orderNo}
+    </select>
+
+    <select id="selectByIdempotentKey" resultMap="BaseResultMap">
+        SELECT <include refid="BaseColumns"/>
+        FROM t_order
+        WHERE idempotent_key = #{idempotentKey}
+    </select>
+
+    <update id="updateStatus">
+        UPDATE t_order
+        SET status = #{status}, updated_at = NOW()
+        WHERE order_no = #{orderNo}
+    </update>
+
+</mapper>

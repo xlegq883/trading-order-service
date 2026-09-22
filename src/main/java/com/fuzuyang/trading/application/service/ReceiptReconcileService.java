@@ -7,6 +7,7 @@ import com.fuzuyang.trading.infrastructure.persistence.entity.ReconcileDiffDO;
 import com.fuzuyang.trading.infrastructure.persistence.mapper.OrderMapper;
 import com.fuzuyang.trading.infrastructure.persistence.mapper.ReceiptMapper;
 import com.fuzuyang.trading.infrastructure.persistence.mapper.ReconcileDiffMapper;
+import com.fuzuyang.trading.infrastructure.persistence.mapper.StockMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -29,13 +30,19 @@ public class ReceiptReconcileService {
     private final OrderMapper orderMapper;
     private final ReceiptMapper receiptMapper;
     private final ReconcileDiffMapper reconcileDiffMapper;
+    private final StockMapper stockMapper;
+    private final StockService stockService;
 
     public ReceiptReconcileService(OrderMapper orderMapper,
                                    ReceiptMapper receiptMapper,
-                                   ReconcileDiffMapper reconcileDiffMapper) {
+                                   ReconcileDiffMapper reconcileDiffMapper,
+                                   StockMapper stockMapper,
+                                   StockService stockService) {
         this.orderMapper = orderMapper;
         this.receiptMapper = receiptMapper;
         this.reconcileDiffMapper = reconcileDiffMapper;
+        this.stockMapper = stockMapper;
+        this.stockService = stockService;
     }
 
     /**
@@ -56,6 +63,7 @@ public class ReceiptReconcileService {
         if (receipt.getStatus() == null || receipt.getStatus() != UPSTREAM_SUCCESS) {
             recordDiff(orderNo, "UPSTREAM_FAILED", "上游处理失败: receiptStatus=" + receipt.getStatus());
             orderMapper.updateStatus(orderNo, OrderStatus.FAILED.getCode());
+            restoreStock(order);
             return;
         }
 
@@ -64,11 +72,22 @@ public class ReceiptReconcileService {
             recordDiff(orderNo, "AMOUNT_MISMATCH",
                     "金额不一致: local=" + order.getAmount() + ", upstream=" + receipt.getAmount());
             orderMapper.updateStatus(orderNo, OrderStatus.FAILED.getCode());
+            restoreStock(order);
             return;
         }
 
         orderMapper.updateStatus(orderNo, OrderStatus.CONFIRMED.getCode());
         log.info("对账一致，订单确认：orderNo={}", orderNo);
+    }
+
+    /**
+     * 对账失败时回补预扣库存（DB + Redis），与超时回补路径保持一致。
+     */
+    private void restoreStock(OrderDO order) {
+        stockMapper.restore(order.getProductId(), order.getQuantity());
+        stockService.release(order.getProductId(), order.getQuantity());
+        log.warn("对账失败回补库存：orderNo={}, productId={}, quantity={}",
+                order.getOrderNo(), order.getProductId(), order.getQuantity());
     }
 
     private void recordDiff(String orderNo, String diffType, String detail) {

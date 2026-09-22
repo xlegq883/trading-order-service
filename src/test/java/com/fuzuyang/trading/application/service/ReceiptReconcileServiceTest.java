@@ -7,6 +7,7 @@ import com.fuzuyang.trading.infrastructure.persistence.entity.ReconcileDiffDO;
 import com.fuzuyang.trading.infrastructure.persistence.mapper.OrderMapper;
 import com.fuzuyang.trading.infrastructure.persistence.mapper.ReceiptMapper;
 import com.fuzuyang.trading.infrastructure.persistence.mapper.ReconcileDiffMapper;
+import com.fuzuyang.trading.infrastructure.persistence.mapper.StockMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -40,6 +41,12 @@ class ReceiptReconcileServiceTest {
     @Mock
     private ReconcileDiffMapper reconcileDiffMapper;
 
+    @Mock
+    private StockMapper stockMapper;
+
+    @Mock
+    private StockService stockService;
+
     @InjectMocks
     private ReceiptReconcileService receiptReconcileService;
 
@@ -52,6 +59,8 @@ class ReceiptReconcileServiceTest {
 
         verify(orderMapper).updateStatus("ON1", OrderStatus.CONFIRMED.getCode());
         verify(reconcileDiffMapper, never()).insert(any());
+        verify(stockMapper, never()).restore(anyString(), anyInt());
+        verifyNoInteractions(stockService);
     }
 
     @Test
@@ -62,6 +71,8 @@ class ReceiptReconcileServiceTest {
         receiptReconcileService.reconcile("ON1");
 
         verify(orderMapper).updateStatus("ON1", OrderStatus.FAILED.getCode());
+        verify(stockMapper).restore("P1", 2);
+        verify(stockService).release("P1", 2);
         assertThat(capturedDiffType()).isEqualTo("AMOUNT_MISMATCH");
     }
 
@@ -73,6 +84,8 @@ class ReceiptReconcileServiceTest {
         receiptReconcileService.reconcile("ON1");
 
         verify(orderMapper).updateStatus("ON1", OrderStatus.FAILED.getCode());
+        verify(stockMapper).restore("P1", 2);
+        verify(stockService).release("P1", 2);
         assertThat(capturedDiffType()).isEqualTo("UPSTREAM_FAILED");
     }
 
@@ -108,6 +121,8 @@ class ReceiptReconcileServiceTest {
         order.setOrderNo(orderNo);
         order.setStatus(status.getCode());
         order.setAmount(new BigDecimal(amount));
+        order.setProductId("P1");
+        order.setQuantity(2);
         return order;
     }
 

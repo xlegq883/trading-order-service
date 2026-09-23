@@ -71,3 +71,16 @@ CREATE TABLE t_reconcile_diff
     created_at DATETIME,
     PRIMARY KEY (id)
 );
+
+DROP TABLE IF EXISTS t_product;
+CREATE TABLE t_product
+(
+    product_id VARCHAR(32)    NOT NULL,
+    name       VARCHAR(64)    NOT NULL,
+    price      DECIMAL(18, 2) NOT NULL,
+    PRIMARY KEY (product_id)
+);
+
+INSERT INTO t_product (product_id, name, price)
+VALUES ('P1001', '商品A', 100.00),
+       ('P1002', '商品B', 50.00);

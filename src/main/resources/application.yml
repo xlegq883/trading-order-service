@@ -66,3 +66,8 @@ app:
     reconcile-interval-ms: 10000
     timeout-interval-ms: 60000
     scan-limit: 100
+  product:
+    # 商品详情缓存：base TTL ± jitter 随机化防雪崩；空值缓存短 TTL 防穿透
+    cache-ttl: PT5M
+    cache-ttl-jitter: PT1M
+    null-cache-ttl: PT30S

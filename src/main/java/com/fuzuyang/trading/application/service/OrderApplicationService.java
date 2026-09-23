@@ -5,6 +5,7 @@ import com.fuzuyang.trading.api.dto.CreateOrderResponse;
 import com.fuzuyang.trading.application.port.IdempotencyStore;
 import com.fuzuyang.trading.common.ErrorCode;
 import com.fuzuyang.trading.common.exception.BusinessException;
+import com.fuzuyang.trading.common.util.OrderNoGenerator;
 import com.fuzuyang.trading.domain.enums.OrderStatus;
 import com.fuzuyang.trading.infrastructure.persistence.entity.OrderDO;
 import com.fuzuyang.trading.infrastructure.persistence.mapper.OrderMapper;
@@ -38,6 +39,9 @@ public class OrderApplicationService {
     /** 命中幂等键后，等待首单落库的有界轮询次数与间隔（合计约 1s）。 */
     private static final int RESOLVE_MAX_ATTEMPTS = 20;
     private static final long RESOLVE_INTERVAL_MILLIS = 50;
+
+    /** 订单号碰撞时的最大换号重试次数。 */
+    private static final int MAX_ORDER_NO_RETRIES = 3;
 
     private final OrderCreationService orderCreationService;
     private final OrderMapper orderMapper;
@@ -82,18 +86,27 @@ public class OrderApplicationService {
             stockService.reserve(productId, quantity);
             reserved = true;
 
-            CreateOrderResponse response = orderCreationService.create(request, idempotencyKey);
-            safePut(redisKey, response.getOrderNo());
-            return response;
-        } catch (DuplicateKeyException ex) {
-            // 并发下唯一索引兜底：本次为多余预扣，回补后返回首单
-            if (reserved) {
-                stockService.release(productId, quantity);
+            for (int attempt = 0; attempt < MAX_ORDER_NO_RETRIES; attempt++) {
+                String orderNo = OrderNoGenerator.generate();
+                try {
+                    CreateOrderResponse response = orderCreationService.create(request, idempotencyKey, orderNo);
+                    safePut(redisKey, response.getOrderNo());
+                    return response;
+                } catch (DuplicateKeyException ex) {
+                    if (orderMapper.selectByIdempotentKey(idempotencyKey) != null) {
+                        // 幂等冲突（唯一索引冲突实为 uk_idempotent_key）：本次为多余预扣，回补后返回首单
+                        stockService.release(productId, quantity);
+                        reserved = false;
+                        log.warn("命中 uk_idempotent_key 唯一索引，返回已存在订单：idempotencyKey={}", idempotencyKey);
+                        return resolveExisting(idempotencyKey, redisKey);
+                    }
+                    // 唯一索引冲突实为 uk_order_no（订单号碰撞）：换号重试
+                    log.warn("订单号碰撞，换号重试：orderNo={}, attempt={}", orderNo, attempt + 1);
+                }
             }
-            log.warn("命中 uk_idempotent_key 唯一索引，返回已存在订单：idempotencyKey={}", idempotencyKey);
-            return resolveExisting(idempotencyKey, redisKey);
+            throw new BusinessException(ErrorCode.SERVER_ERROR, "生成订单号失败，请重试");
         } catch (RuntimeException ex) {
-            // 落单失败（含库存不足）：回补已预扣库存并释放幂等键，允许重试
+            // 落单失败（含库存不足、换号重试耗尽）：回补已预扣库存并释放幂等键，允许重试
             if (reserved) {
                 stockService.release(productId, quantity);
             }

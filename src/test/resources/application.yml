@@ -7,6 +7,10 @@ spring:
     password: ""
     hikari:
       initialization-fail-timeout: -1
+  sql:
+    init:
+      # 显式 UTF-8，否则 Windows 下按平台编码(GBK)读取 schema.sql 导致中文种子乱码
+      encoding: UTF-8
   kafka:
     bootstrap-servers: localhost:9092
     listener:

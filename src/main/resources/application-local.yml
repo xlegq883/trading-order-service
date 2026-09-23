@@ -10,7 +10,7 @@ spring:
       # -1 表示启动时不做连接探测：数据库不可用也不能阻止应用启动。
       initialization-fail-timeout: -1
       connection-timeout: 3000
-      maximum-pool-size: 10
+      maximum-pool-size: 30
       minimum-idle: 2
   data:
     redis:

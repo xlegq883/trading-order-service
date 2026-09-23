@@ -102,9 +102,26 @@ CREATE TABLE IF NOT EXISTS t_reconcile_diff
   DEFAULT CHARSET = utf8mb4 COMMENT ='对账差异表';
 
 -- ---------------------------------------------------------------------------
--- 库存种子数据（2 条）
+-- 商品表（缓存治理用）
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS t_product
+(
+    product_id VARCHAR(32)    NOT NULL COMMENT '商品 ID',
+    name       VARCHAR(64)    NOT NULL COMMENT '商品名称',
+    price      DECIMAL(18, 2) NOT NULL COMMENT '商品价格',
+    PRIMARY KEY (product_id)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COMMENT ='商品表';
+
+-- ---------------------------------------------------------------------------
+-- 种子数据
 -- ---------------------------------------------------------------------------
 INSERT INTO t_stock (product_id, total, available, version)
 VALUES ('P1001', 100, 100, 0),
        ('P1002', 50, 50, 0)
+ON DUPLICATE KEY UPDATE product_id = product_id;
+
+INSERT INTO t_product (product_id, name, price)
+VALUES ('P1001', '商品A', 100.00),
+       ('P1002', '商品B', 50.00)
 ON DUPLICATE KEY UPDATE product_id = product_id;

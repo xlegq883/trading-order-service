@@ -44,6 +44,7 @@ common (统一响应 / 错误码 / 工具)
 | `t_outbox` | status、retry_count、next_retry_at | `idx_status_next(status, next_retry_at)` |
 | `t_receipt` | order_no、upstream_no、status、amount | `uk_receipt_order_no(order_no)` |
 | `t_reconcile_diff` | order_no、diff_type、detail | `idx_reconcile_order_no(order_no)` |
+| `t_product` | product_id、name、price | 主键 `product_id` |
 
 建表与种子数据见 [`sql/init.sql`](sql/init.sql)。
 
@@ -154,6 +155,22 @@ curl -X POST http://localhost:8080/api/orders \
 - 迟到回执：订单已被置 `FAILED` 时，`handleReceipt` 只记 `LATE_RECEIPT` 差异，不回退状态。
 - 差异记录在 `t_reconcile_diff`；本地 DB 为唯一事实来源，最终状态 `CREATED → REPORTED → CONFIRMED / FAILED`。
 
+#### 缓存治理（D10）
+
+- `GET /api/products/{productId}`：**cache-aside**，先查 Redis(`product:{id}`)，miss 回源 `t_product` 并写缓存。
+- **防穿透**：商品不存在时写空值标记 `__NULL__`（TTL `app.product.null-cache-ttl`，默认 30s），后续直接返回 404 不再查库。
+- **防雪崩**：写缓存 TTL 随机化 `base ± jitter`（默认 5min ± 1min）。
+- **一致性**：`PUT /api/products/{id}` 先更库、再删缓存（cache-aside 标准顺序；README 说明延迟双删与反序竞态）。
+- Redis 不可用时降级直读 DB，不影响接口。
+
+```bash
+curl http://localhost:8080/api/products/P1001
+# {"code":0,"message":"ok","data":{"productId":"P1001","name":"商品A","price":100.00}}
+
+curl -X PUT http://localhost:8080/api/products/P1001 \
+  -H "Content-Type: application/json" -d '{"name":"商品A改","price":88.00}'
+```
+
 ### 端口约定
 
 | 服务 | 宿主机端口 | 说明 |
@@ -172,19 +189,20 @@ trading-order-service/
   sql/init.sql
   src/main/java/com/fuzuyang/trading/
     TradingOrderServiceApplication.java
-    api/controller/{HealthController,OrderController,ReceiptController}.java
-    api/dto/{CreateOrderRequest,CreateOrderResponse,HandleReceiptRequest}.java
+    api/controller/{HealthController,OrderController,ReceiptController,ProductController}.java
+    api/dto/{CreateOrderRequest,CreateOrderResponse,HandleReceiptRequest,ProductResponse,UpdateProductRequest}.java
     application/service/OrderApplicationService.java   # 幂等 + 库存编排
     application/service/OrderCreationService.java      # @Transactional 落单 + DB 扣减
     application/service/ReceiptApplicationService.java # 回执幂等处理
     application/service/ReceiptReconcileService.java   # 回执对账（比对 status/amount）
+    application/service/ProductApplicationService.java # 商品缓存治理（cache-aside/空值/TTL 随机）
     application/service/StockService.java              # 库存预热/预扣/回补
     application/service/StockWarmUpRunner.java         # 启动预热
     application/service/OutboxService.java             # Outbox 写入（同事务）
     application/event/OrderCreatedEvent.java           # 事件消息体
     application/task/{StockTimeoutTask,OutboxRelayTask,ReceiptReconcileTask,ReceiptTimeoutTask}.java
-    application/port/{IdempotencyStore,StockCache}.java # 端口
-    infrastructure/redis/{RedisIdempotencyStore,RedisStockCache}.java  # Redis 实现
+    application/port/{IdempotencyStore,StockCache,ProductCache}.java # 端口
+    infrastructure/redis/{RedisIdempotencyStore,RedisStockCache,RedisProductCache}.java  # Redis 实现
     infrastructure/kafka/{KafkaTopicConfig,OrderEventConsumer}.java    # Topic + 消费者
     domain/enums/                # OrderStatus / OutboxStatus
     infrastructure/persistence/entity/   # 4 个 DO
@@ -197,7 +215,7 @@ trading-order-service/
 
 ## 7. 进度清单
 
-### D1–D6 已完成
+### D1–D12 已完成
 - [x] Maven 工程骨架（Spring Boot 3.2.5 + Java 17，UTF-8）
 - [x] 五层目录结构（api/application/domain/infrastructure/common）
 - [x] `application.yml` / `application-local.yml`（MySQL 3307、Redis 6379、Kafka 9092）
@@ -216,13 +234,52 @@ trading-order-service/
 - [x] **D7** 缓冲日：补 Outbox 异常路径测试（扫描过滤/终态不重试/批内隔离）+ 文档
 - [x] **D8** Kafka 消费者（模拟上游）+ 回执接口：消费幂等（orderNo）+ 状态 `CREATED → REPORTED`
 - [x] **D9** 回执对账：比对 status/amount → `CONFIRMED`/`FAILED` + `t_reconcile_diff`；超时无回执回补库存
-- [x] 测试：单测 + H2 全链路集成测试（含 outbox 落库、回执幂等、对账、超时、Mapper 边界）
+- [x] **D10** 缓存治理：商品 cache-aside + 空值缓存防穿透 + TTL 随机化防雪崩 + 先更库再删缓存
+- [x] **D11** 异常路径测试：库存不足/重复请求/投递失败/重复回执/非法 JSON/全局异常码映射
+- [x] **D12** 压测（JMeter）：并发下单 + 不超卖验证；发现并修复订单号碰撞 bug；Hikari 连接池调优复测
+- [x] 测试：单测 + H2 全链路集成测试（含 outbox 落库、回执幂等、对账、超时、缓存、异常路径、Mapper 边界）
 
-### D9+ 待做
-- [ ] D10 缓存治理；D11 异常路径测试
-- [ ] D12 压测（QPS/P99）并写入 README
+### D13+ 待做
 - [ ] D13 架构图与设计取舍；D14 上传 GitHub
 
-## 8. 明确不做
+## 8. 压测数据（D12）
+
+> 工具：Apache JMeter 5.6.3（非 GUI）；压测计划见 [`loadtest/order_load.jmx`](loadtest/order_load.jmx)。
+> 环境：**单机压测，JMeter 与被测应用共享同一台机器 CPU**，MySQL/Redis/Kafka 亦同机容器；数据为本地演示参考，非生产基准。
+> 命令：`jmeter -n -t loadtest/order_load.jmx -Jthreads=100 -Jloops=50 -Jproduct=P1001 -l r.jtl -e -o report/`
+> 幂等键 `__UUID()`、userId `U-load-${__Random(1,10000)}`（模拟多用户）；无思考时间（极限施压）。
+
+### 场景一：吞吐/延迟（P1001 库存充足，100 线程 × 50 = 5000 请求）
+
+| 指标 | 基线 | 修复订单号 bug + Hikari 10→30 |
+| --- | --- | --- |
+| 成功 | 4998 × 200 | **5000 × 200** |
+| 错误 | 2 × 409（订单号碰撞误判） | **0** |
+| QPS | 150.6 /s | 155.8 /s |
+| P50 | 649 ms | 626 ms |
+| P90 | 724 ms | 675 ms |
+| P95 | 741 ms | 692 ms |
+| P99 | 907 ms | 809 ms |
+| Avg / Max | 642 / 7424 ms | 626 / 1017 ms |
+
+### 场景二：不超卖（P1002 库存 100，100 线程 × 3 = 300 请求）
+
+| 指标 | 结果 |
+| --- | --- |
+| 响应 | 100 × 200（成功）+ 200 × 422（库存不足），0 × 5xx |
+| QPS | 345.6 /s |
+| P50 / P90 / P95 / P99 | 61 / 242 / 300 / 357 ms |
+| 库存校验 | DB `available=0`、无负库存、成功订单=100、Redis `stock:P1002=0` |
+
+### 压测发现并修复的 Bug
+
+- **现象**：场景一 5000 请求出现 2 个 409（0.04%）。
+- **根因**：`OrderNoGenerator` 原为 `yyyyMMddHHmmss`(秒) + 6 位随机，同一秒 ~170 单时生日碰撞；且 `OrderApplicationService` 把 `DuplicateKeyException` 一律当幂等键冲突，实为 `uk_order_no` 碰撞 → 误返回 409。
+- **修复**：订单号改 `yyyyMMddHHmmssSSS`(毫秒) + `AtomicLong` 3 位序列；捕获 `DuplicateKeyException` 后**主动查幂等键**区分——命中即幂等冲突返回首单，未命中即订单号碰撞则换号重试（≤3 次）。
+- **效果**：5000 请求 0 错误。
+
+> 结论：`QPS ≈ 并发 / 平均延迟`（Little's Law）。Hikari 10→30 主要改善尾延迟（P99 907→809ms）；QPS 未显著提升说明瓶颈更可能在单机 CPU 与端到端 SQL 往返，可作后续调优方向（减少状态 UPDATE、合批/异步化）。
+
+## 9. 明确不做
 
 分库分表、Elasticsearch、微服务拆分、Spring Cloud 全家桶（面试口述，不写代码）。

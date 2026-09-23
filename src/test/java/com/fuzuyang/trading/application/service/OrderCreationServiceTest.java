@@ -44,12 +44,13 @@ class OrderCreationServiceTest {
     void shouldInsertDeductAndTransitStatuses() {
         when(stockMapper.deduct("P1001", 2)).thenReturn(1);
 
-        CreateOrderResponse response = orderCreationService.create(request(), "k1");
+        CreateOrderResponse response = orderCreationService.create(request(), "k1", "ON-FIXED-1");
 
         ArgumentCaptor<OrderDO> captor = ArgumentCaptor.forClass(OrderDO.class);
         verify(orderMapper).insert(captor.capture());
         OrderDO inserted = captor.getValue();
 
+        assertThat(inserted.getOrderNo()).isEqualTo("ON-FIXED-1");
         assertThat(inserted.getStatus()).isEqualTo(OrderStatus.INIT.getCode());
         assertThat(inserted.getIdempotentKey()).isEqualTo("k1");
         verify(stockMapper).deduct("P1001", 2);
@@ -63,7 +64,7 @@ class OrderCreationServiceTest {
     void shouldThrowWhenStockInsufficient() {
         when(stockMapper.deduct("P1001", 2)).thenReturn(0);
 
-        assertThatThrownBy(() -> orderCreationService.create(request(), "k1"))
+        assertThatThrownBy(() -> orderCreationService.create(request(), "k1", "ON-FIXED-2"))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("库存不足");
 

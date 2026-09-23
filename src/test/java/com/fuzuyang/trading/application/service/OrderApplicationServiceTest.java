@@ -27,6 +27,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -58,7 +59,7 @@ class OrderApplicationServiceTest {
     void shouldReserveStockAndCreateWhenLockAcquired() {
         when(idempotencyStore.tryLock(anyString(), anyString(), any())).thenReturn(true);
         when(orderMapper.selectByIdempotentKey("k1")).thenReturn(null);
-        when(orderCreationService.create(any(), eq("k1")))
+        when(orderCreationService.create(any(), eq("k1"), anyString()))
                 .thenReturn(new CreateOrderResponse("ON1", "CREATED"));
 
         CreateOrderResponse response = orderApplicationService.createOrder(request(), "k1");
@@ -79,7 +80,7 @@ class OrderApplicationServiceTest {
 
         assertThat(response.getOrderNo()).isEqualTo("ON1");
         verify(stockService, never()).reserve(anyString(), anyInt());
-        verify(orderCreationService, never()).create(any(), any());
+        verify(orderCreationService, never()).create(any(), any(), any());
     }
 
     @Test
@@ -91,7 +92,7 @@ class OrderApplicationServiceTest {
 
         assertThat(response.getOrderNo()).isEqualTo("ON5");
         verify(stockService, never()).reserve(anyString(), anyInt());
-        verify(orderCreationService, never()).create(any(), any());
+        verify(orderCreationService, never()).create(any(), any(), any());
         verify(idempotencyStore).put(eq(REDIS_KEY), eq("ON5"), eq(Duration.ofHours(24)));
     }
 
@@ -106,7 +107,7 @@ class OrderApplicationServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("库存不足");
 
-        verify(orderCreationService, never()).create(any(), any());
+        verify(orderCreationService, never()).create(any(), any(), any());
         verify(stockService, never()).release(anyString(), anyInt());
         verify(idempotencyStore).remove(REDIS_KEY);
     }
@@ -116,7 +117,7 @@ class OrderApplicationServiceTest {
         when(idempotencyStore.tryLock(anyString(), anyString(), any()))
                 .thenThrow(new RedisConnectionFailureException("connection refused"));
         when(orderMapper.selectByIdempotentKey("k1")).thenReturn(null);
-        when(orderCreationService.create(any(), eq("k1")))
+        when(orderCreationService.create(any(), eq("k1"), anyString()))
                 .thenReturn(new CreateOrderResponse("ON2", "CREATED"));
 
         CreateOrderResponse response = orderApplicationService.createOrder(request(), "k1");
@@ -131,7 +132,7 @@ class OrderApplicationServiceTest {
         when(orderMapper.selectByIdempotentKey("k1"))
                 .thenReturn(null)
                 .thenReturn(order("ON9", OrderStatus.CREATED));
-        when(orderCreationService.create(any(), eq("k1"))).thenThrow(new DuplicateKeyException("dup"));
+        when(orderCreationService.create(any(), eq("k1"), anyString())).thenThrow(new DuplicateKeyException("dup"));
         when(idempotencyStore.get(REDIS_KEY)).thenReturn(Optional.empty());
 
         CreateOrderResponse response = orderApplicationService.createOrder(request(), "k1");
@@ -149,6 +150,36 @@ class OrderApplicationServiceTest {
         assertThatThrownBy(() -> orderApplicationService.createOrder(request(), "k1"))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("处理中");
+    }
+
+    @Test
+    void shouldReleaseStockAndIdempotencyKeyWhenCreateFails() {
+        when(idempotencyStore.tryLock(anyString(), anyString(), any())).thenReturn(true);
+        when(orderMapper.selectByIdempotentKey("k1")).thenReturn(null);
+        when(orderCreationService.create(any(), eq("k1"), anyString())).thenThrow(new IllegalStateException("boom"));
+
+        assertThatThrownBy(() -> orderApplicationService.createOrder(request(), "k1"))
+                .isInstanceOf(IllegalStateException.class);
+
+        verify(stockService).release(PRODUCT_ID, 2);
+        verify(idempotencyStore).remove(REDIS_KEY);
+    }
+
+    @Test
+    void shouldRetryWithNewOrderNoOnOrderNoCollision() {
+        when(idempotencyStore.tryLock(anyString(), anyString(), any())).thenReturn(true);
+        // 预检与碰撞后查库都为 null → 判定为 order_no 碰撞（非幂等冲突）
+        when(orderMapper.selectByIdempotentKey("k1")).thenReturn(null);
+        when(orderCreationService.create(any(), eq("k1"), anyString()))
+                .thenThrow(new DuplicateKeyException("uk_order_no dup"))
+                .thenReturn(new CreateOrderResponse("ON-RETRY", "CREATED"));
+
+        CreateOrderResponse response = orderApplicationService.createOrder(request(), "k1");
+
+        assertThat(response.getOrderNo()).isEqualTo("ON-RETRY");
+        verify(orderCreationService, times(2)).create(any(), eq("k1"), anyString());
+        verify(stockService, never()).release(anyString(), anyInt());
+        verify(idempotencyStore).put(eq(REDIS_KEY), eq("ON-RETRY"), eq(Duration.ofHours(24)));
     }
 
     private CreateOrderRequest request() {

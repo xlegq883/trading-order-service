@@ -17,6 +17,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 
@@ -55,5 +56,14 @@ class OrderEventConsumerTest {
         assertThat(request.getUpstreamNo()).startsWith("UP");
         assertThat(request.getStatus()).isEqualTo(1);
         assertThat(request.getAmount()).isEqualByComparingTo(new BigDecimal("10.00"));
+    }
+
+    @Test
+    void shouldThrowWhenJsonInvalid() {
+        ConsumerRecord<String, String> record =
+                new ConsumerRecord<>("trading.order.events", 0, 0L, "ON1", "{not-a-valid-json");
+
+        assertThatThrownBy(() -> orderEventConsumer.onMessage(record))
+                .isInstanceOf(IllegalStateException.class);
     }
 }

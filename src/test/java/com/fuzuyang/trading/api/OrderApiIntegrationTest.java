@@ -274,6 +274,30 @@ class OrderApiIntegrationTest {
                 .extracting(ReconcileDiffDO::getDiffType).containsExactly("RECEIPT_TIMEOUT");
     }
 
+    @Test
+    void shouldReturn400WhenJsonMalformed() throws Exception {
+        mockMvc.perform(post("/api/orders")
+                        .header(HEADER, "it-bad-json")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{not-a-valid-json"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400));
+    }
+
+    @Test
+    void shouldReturn404WhenReceiptOrderMissing() throws Exception {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("orderNo", "NO-SUCH-ORDER");
+        body.put("upstreamNo", "UP-X");
+        body.put("status", 1);
+
+        mockMvc.perform(post("/api/receipts")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(404));
+    }
+
     private void handleReceipt(String orderNo, String upstreamNo, BigDecimal amount) {
         HandleReceiptRequest request = new HandleReceiptRequest();
         request.setOrderNo(orderNo);

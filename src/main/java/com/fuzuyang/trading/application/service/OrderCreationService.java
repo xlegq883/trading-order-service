@@ -4,7 +4,6 @@ import com.fuzuyang.trading.api.dto.CreateOrderRequest;
 import com.fuzuyang.trading.api.dto.CreateOrderResponse;
 import com.fuzuyang.trading.common.ErrorCode;
 import com.fuzuyang.trading.common.exception.BusinessException;
-import com.fuzuyang.trading.common.util.OrderNoGenerator;
 import com.fuzuyang.trading.domain.enums.OrderStatus;
 import com.fuzuyang.trading.infrastructure.persistence.entity.OrderDO;
 import com.fuzuyang.trading.infrastructure.persistence.mapper.OrderMapper;
@@ -19,7 +18,8 @@ import java.time.LocalDateTime;
  * 订单落单事务单元。
  *
  * <p>只负责「插入订单 + DB 扣减库存 + 状态流转」这一本地事务；
- * 幂等预检与 Redis 预扣由 {@link OrderApplicationService} 编排，避免 Redis 操作进入事务。</p>
+ * 订单号由编排层生成并传入（便于订单号碰撞时换号重试），幂等预检与 Redis 预扣由
+ * {@link OrderApplicationService} 编排，避免 Redis 操作进入事务。</p>
  *
  * <p>状态流转：INIT → STOCK_LOCKED → CREATED。</p>
  */
@@ -39,13 +39,14 @@ public class OrderCreationService {
     /**
      * 落单：插入 INIT，DB 条件扣减库存，再流转到 STOCK_LOCKED → CREATED。
      *
+     * @param orderNo 由编排层生成并传入的订单号（订单号碰撞时由编排层换号重试）
      * @throws BusinessException 库存不足（{@link ErrorCode#STOCK_INSUFFICIENT}），事务回滚
      */
     @Transactional
-    public CreateOrderResponse create(CreateOrderRequest request, String idempotencyKey) {
+    public CreateOrderResponse create(CreateOrderRequest request, String idempotencyKey, String orderNo) {
         LocalDateTime now = LocalDateTime.now();
         OrderDO order = new OrderDO();
-        order.setOrderNo(OrderNoGenerator.generate());
+        order.setOrderNo(orderNo);
         order.setUserId(request.getUserId());
         order.setProductId(request.getProductId());
         order.setQuantity(request.getQuantity());

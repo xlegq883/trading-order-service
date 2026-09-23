@@ -30,3 +30,8 @@ spring-shell.log
 
 # 本地环境覆盖（如需保密）
 application-secret.yml
+
+# 压测产物（保留 loadtest/*.jmx 计划）
+loadtest/*.jtl
+loadtest/report_*/
+loadtest/last_s1.txt

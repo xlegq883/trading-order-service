@@ -1,7 +1,9 @@
 # trading-order-service
 
-> 个人作品集项目（**非生产系统**，如实标注）。目标：能跑、能压测、能演示、能讲清，
-> 把「我说做过」变成「你看代码」。当前进度：**D1–D13 完成**。
+> 作者：xlegq883 · GitHub: https://github.com/xlegq883/trading-order-service
+
+这是我的个人作品集项目（**非生产系统**）。我想让它能跑、能压测、能演示、能讲清——
+面试时不只「我说做过」，而是「你看代码」。当前进度：**D1–D13 完成**。
 
 ```
 api ──▶ application ──▶ domain ──▶ infrastructure ──▶ MySQL / Redis / Kafka
@@ -10,11 +12,11 @@ api ──▶ application ──▶ domain ──▶ infrastructure ──▶ My
 
 ## 1. 定位
 
-复刻简历主题（交易/订单、幂等、库存防超卖、Outbox 最终一致性、缓存治理）的 Java 后端项目，
-覆盖高并发下单的核心考点，作为面试可演示、可追问的作品。
+我围绕交易下单这条线，实现了幂等、库存防超卖、Outbox 最终一致性、缓存治理，
+覆盖高并发下单的核心考点，也方便面试时被追问。
 
-- 设计参考：《项目设计文档.md》（原稿偏 Go/gRPC，本项目用 **Java + REST** 适配）
-- 进度计划：《MVP两周冲刺计划.md》
+我早期写过一版偏 Go/gRPC 的设计草稿，最终决定用 **Java 17 + Spring Boot 3 + REST** 落地，
+并按照自己的两周计划推进。
 
 ## 2. 技术栈
 
@@ -29,6 +31,8 @@ api ──▶ application ──▶ domain ──▶ infrastructure ──▶ My
 | 部署 | Docker Compose |
 
 ## 3. 架构（DDD 分层）
+
+我把代码按 DDD 拆成 api / application / domain / infrastructure，并刻意把**编排层与事务层分开**。
 
 包结构：`com.fuzuyang.trading.{api, application, domain, infrastructure, common}`
 
@@ -108,6 +112,8 @@ flowchart TD
 
 ## 4. 设计取舍
 
+下面是我真正做过取舍、也最容易被追问的点：
+
 | 主题 | 取舍 | 理由 |
 | --- | --- | --- |
 | 幂等正确性 | Redis `SETNX` 仅作性能优化，`uk_idempotent_key` 唯一索引才是正确性保证 | Redis 可降级；DB 约束不丢 |
@@ -154,17 +160,17 @@ flowchart TD
 | D12 压测复盘 | [`docs/D12压测复盘.md`](docs/D12压测复盘.md) |
 | 测试报告模板 | [`docs/测试报告模板.md`](docs/测试报告模板.md) |
 
-### 踩坑精选（详情见 docs/）
+### 我踩过的坑（详情见 docs/）
 
-- **H2 中文种子乱码**：Windows 上 Spring `spring.sql.init` 默认按平台编码(GBK)读 `schema.sql`，显式 `spring.sql.init.encoding: UTF-8` 解决。
-- **订单号碰撞误判**：秒级时间戳+随机在 ~170 单/秒发生生日碰撞，且 `DuplicateKeyException` 被误当幂等冲突 → 改毫秒时间戳+序列，并主动查库区分唯一约束（见 [D12 压测复盘](docs/D12压测复盘.md)）。
-- **预热与回补竞态**：启动预热与超时回补并发写 Redis，旧值可能覆盖回补 → 定时任务首次执行延迟一个周期。
-- **失败路径回补不一致**：对账失败(FAILED)与超时失败的回补行为需一致，否则破坏库存守恒不变量（见 [踩坑与问题记录](docs/踩坑与问题记录.md)）。
-- **200 并发首连偶发异常**：客户端连接池 + `localhost` 双栈竞态 → 改用 `127.0.0.1` 并对幂等接口安全重试。
+- **H2 中文种子乱码**：Windows 上 Spring `spring.sql.init` 默认按平台编码(GBK)读 `schema.sql`；我显式设成 `spring.sql.init.encoding: UTF-8` 解决。
+- **订单号碰撞误判**：秒级时间戳+随机在 ~170 单/秒发生生日碰撞，且 `DuplicateKeyException` 被误当幂等冲突；我改成毫秒时间戳+序列，并主动查库区分唯一约束（见 [D12 压测复盘](docs/D12压测复盘.md)）。
+- **预热与回补竞态**：启动预热与超时回补会并发写 Redis，旧值可能覆盖回补；我给定时任务首次执行加了一个周期延迟。
+- **失败路径回补不一致**：对账失败(FAILED)与超时失败的回补行为需一致，否则破坏库存守恒不变量；我把两条路径对齐（见 [踩坑与问题记录](docs/踩坑与问题记录.md)）。
+- **200 并发首连偶发异常**：客户端连接池 + `localhost` 双栈竞态；我改用 `127.0.0.1` 并对幂等接口安全重试。
 
 ## 8. 启动步骤
 
-前置：JDK 17、Maven 3.9+、Docker Desktop。
+本地我是这样起依赖和应用（前置：JDK 17、Maven 3.9+、Docker Desktop）：
 
 ```powershell
 # 1) 启动依赖（MySQL 映射到宿主机 3307，因本机 3306 已被占用）
@@ -219,23 +225,23 @@ curl -X POST http://localhost:8080/api/orders \
 
 #### 幂等（D4）
 
-- 幂等键由请求头 `x-idempotency-key` 传入。
-- 流程：Redis `SET key value NX EX 86400`（24h）抢占 → 命中则返回首单 → `t_order.uk_idempotent_key` 唯一索引兜底。
-- 结论：**Redis 只是性能优化，DB 唯一约束才是正确性保证**；Redis 不可用时自动降级，仅靠唯一索引仍只落 1 单。
+- 我把幂等键放在请求头 `x-idempotency-key`。
+- 服务先用 Redis `SET key value NX EX 86400`（24h）抢占；命中则返回首单；最后由 `t_order.uk_idempotent_key` 唯一索引兜底。
+- 我的结论是：**Redis 只是性能优化，DB 唯一约束才是正确性保证**；Redis 不可用时自动降级，仅靠唯一索引仍只落 1 单。
 - 相同 key 重复调用返回**同一个 orderNo**；同 key 首单仍在处理中时返回 HTTP 409。
 
 #### 库存（D5）
 
-- 启动预热 `t_stock` 到 Redis（`stock:{productId}`）。
-- 下单：Redis **Lua 原子「检查+扣减」**（并发闸门）→ DB `UPDATE ... WHERE available >= ?`（持久真相）→ 状态机 `INIT → STOCK_LOCKED → CREATED`。
+- 我在启动时把 `t_stock` 预热进 Redis（`stock:{productId}`）。
+- 下单时：服务先做 Redis **Lua 原子「检查+扣减」**（并发闸门），再由 DB `UPDATE ... WHERE available >= ?` 作为持久真相，状态机 `INIT → STOCK_LOCKED → CREATED`。
 - 失败补偿：落单失败回补 Redis 预扣；`DuplicateKeyException` 回补多余预扣。
 - Redis 不可用 → 降级为纯 DB 条件扣减，仍不超卖。
-- 超时回补：`@Scheduled` 扫描长时间停留 `STOCK_LOCKED` 的订单（`app.stock.lock-timeout`，默认 15 分钟）→ 回补 DB+Redis 库存并置 `FAILED`。
-- 踩坑：预热与超时任务会并发写 Redis，故定时任务首次执行延迟一个周期（`initialDelayString`），确保预热先完成，避免旧值覆盖回补结果。
+- 超时回补：定时任务扫描长时间停留 `STOCK_LOCKED` 的订单（`app.stock.lock-timeout`，默认 15 分钟）→ 回补 DB+Redis 库存并置 `FAILED`。
+- 踩坑：预热与超时任务会并发写 Redis。我给定时任务首次执行延迟一个周期（`initialDelayString`），确保预热先完成，避免旧值覆盖回补结果。
 
 #### Outbox 可靠投递（D6）
 
-- 下单事务内**同写 `t_order` + `t_outbox`**（本地事务保证「订单落库 ⇔ 消息待投递」）。
+- 我把 `t_order` 与 `t_outbox` 放在**同一个本地事务**里写（保证「订单落库 ⇔ 消息待投递」）。
 - 后台任务 `OutboxRelayTask` 按 `idx_status_next(status, next_retry_at)` 扫描待发送消息，投递 Kafka（topic `trading.order.events`，key=orderNo 保证同单有序）。
 - 失败按**指数退避**重试：`delay = min(5s × 2^(retry-1), 5min)`；达到 `max-retries`(默认 5) 置 `FAILED` 并打 ERROR 日志。
 - 语义「至少一次」，消费端幂等（D8）达到「恰好一次」效果；Kafka 不可用不影响下单。
@@ -256,7 +262,7 @@ curl -X POST http://localhost:8080/api/orders \
 - `OrderEventConsumer` 监听 `trading.order.events`（group `trading-order-service`），模拟上游消费。
 - 消费幂等：以业务唯一键 `orderNo` 为准，先查 `t_receipt`，命中直接返回；`uk_receipt_order_no` 唯一索引兜底并发/重复。
 - 处理成功后订单状态 `CREATED → REPORTED`，并落 `t_receipt`（含上游流水号）。
-- 另提供 `POST /api/receipts` 回执接口（`{orderNo, upstreamNo, status}`），消费者内部直调同一应用服务。
+- 我另对外提供 `POST /api/receipts` 回执接口（`{orderNo, upstreamNo, status}`）；消费者内部直调同一应用服务。
 - 处理失败抛异常，交给 Spring Kafka 默认错误处理器重试（配合幂等最终一致）。
 
 #### 回执对账与最终一致（D9）
@@ -332,6 +338,8 @@ trading-order-service/
 
 ## 10. 进度清单
 
+我按自己的两周计划推进，已完成：
+
 ### D1–D13 已完成
 - [x] Maven 工程骨架（Spring Boot 3.2.5 + Java 17，UTF-8）
 - [x] 五层目录结构（api/application/domain/infrastructure/common）
@@ -362,8 +370,10 @@ trading-order-service/
 
 ## 11. 压测数据（D12）
 
+下面是我用 JMeter 在本机压出的数据，仅作本地演示参考。
+
 > 工具：Apache JMeter 5.6.3（非 GUI）；压测计划见 [`loadtest/order_load.jmx`](loadtest/order_load.jmx)。
-> 环境：**单机压测，JMeter 与被测应用共享同一台机器 CPU**，MySQL/Redis/Kafka 亦同机容器；数据为本地演示参考，非生产基准。
+> 环境：**单机压测，JMeter 与被测应用共享同一台机器 CPU**，MySQL/Redis/Kafka 亦同机容器；非生产基准。
 > 命令：`jmeter -n -t loadtest/order_load.jmx -Jthreads=100 -Jloops=50 -Jproduct=P1001 -l r.jtl -e -o report/`
 > 幂等键 `__UUID()`、userId `U-load-${__Random(1,10000)}`（模拟多用户）；无思考时间（极限施压）。
 
@@ -389,7 +399,7 @@ trading-order-service/
 | P50 / P90 / P95 / P99 | 61 / 242 / 300 / 357 ms |
 | 库存校验 | DB `available=0`、无负库存、成功订单=100、Redis `stock:P1002=0` |
 
-### 压测发现并修复的 Bug
+### 压测中我发现并修复的 Bug
 
 - **现象**：场景一 5000 请求出现 2 个 409（0.04%）。
 - **根因**：`OrderNoGenerator` 原为 `yyyyMMddHHmmss`(秒) + 6 位随机，同一秒 ~170 单时生日碰撞；且 `OrderApplicationService` 把 `DuplicateKeyException` 一律当幂等键冲突，实为 `uk_order_no` 碰撞 → 误返回 409。
@@ -400,4 +410,4 @@ trading-order-service/
 
 ## 12. 明确不做
 
-分库分表、Elasticsearch、微服务拆分、Spring Cloud 全家桶（面试口述，不写代码）。
+为了聚焦可演示的核心链路，我明确不做分库分表、Elasticsearch、微服务拆分、Spring Cloud 全家桶——这些留到面试口述。

@@ -112,8 +112,6 @@ flowchart TD
 
 ## 4. 设计取舍
 
-下面是我真正做过取舍、也最容易被追问的点：
-
 | 主题 | 取舍 | 理由 |
 | --- | --- | --- |
 | 幂等正确性 | Redis `SETNX` 仅作性能优化，`uk_idempotent_key` 唯一索引才是正确性保证 | Redis 可降级；DB 约束不丢 |
@@ -408,6 +406,3 @@ trading-order-service/
 
 > 结论：`QPS ≈ 并发 / 平均延迟`（Little's Law）。Hikari 10→30 主要改善尾延迟（P99 907→809ms）；QPS 未显著提升说明瓶颈更可能在单机 CPU 与端到端 SQL 往返，可作后续调优方向（减少状态 UPDATE、合批/异步化）。
 
-## 12. 明确不做
-
-为了聚焦可演示的核心链路，我明确不做分库分表、Elasticsearch、微服务拆分、Spring Cloud 全家桶——这些留到面试口述。

@@ -1,7 +1,12 @@
 # trading-order-service
 
 > 个人作品集项目（**非生产系统**，如实标注）。目标：能跑、能压测、能演示、能讲清，
-> 把「我说做过」变成「你看代码」。当前进度：**D1–D2 完成**。
+> 把「我说做过」变成「你看代码」。当前进度：**D1–D13 完成**。
+
+```
+api ──▶ application ──▶ domain ──▶ infrastructure ──▶ MySQL / Redis / Kafka
+        (编排/幂等/库存/事务)        (领域枚举)        (MyBatis / Redis / Kafka)
+```
 
 ## 1. 定位
 
@@ -25,17 +30,105 @@
 
 ## 3. 架构（DDD 分层）
 
-```
-api (REST Controller / DTO)
-  └─> application (用例编排 / 事务边界 / 幂等前置)
-        └─> domain (实体 / 领域规则 / 枚举)
-              └─> infrastructure (MyBatis / MySQL / Redis / Kafka / Outbox)
-common (统一响应 / 错误码 / 工具)
-```
-
 包结构：`com.fuzuyang.trading.{api, application, domain, infrastructure, common}`
 
-## 4. 数据库设计
+### 全局链路
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant API as OrderController
+    participant APP as OrderApplicationService<br/>(编排/非事务)
+    participant STK as StockService (Redis Lua)
+    participant CR as OrderCreationService<br/>(@Transactional)
+    participant DB as MySQL
+    participant RLY as OutboxRelayTask
+    participant MQ as Kafka
+    participant CON as OrderEventConsumer<br/>(模拟上游)
+    participant REC as ReceiptApplicationService
+    participant RC as ReceiptReconcileTask
+
+    C->>API: POST /api/orders (x-idempotency-key)
+    API->>APP: createOrder()
+    APP->>APP: Redis SETNX 幂等抢占
+    APP->>STK: reserve(productId, quantity)
+    STK->>STK: Lua 原子「检查+扣减」
+    APP->>CR: create(request, idemKey, orderNo)
+    CR->>DB: insert t_order + 扣库存 + insert t_outbox
+    CR-->>APP: CREATED
+    APP-->>C: 200 {orderNo, CREATED}
+
+    Note over RLY,DB: 后台定时
+    RLY->>DB: selectPending(status=0, next_retry_at<=now)
+    RLY->>MQ: send(topic, key=orderNo)
+    MQ->>CON: consume
+    CON->>REC: handleReceipt (orderNo 幂等)
+    REC->>DB: insert t_receipt + status REPORTED
+
+    Note over RC,DB: 对账
+    RC->>DB: 比对 status/amount -> CONFIRMED/FAILED + t_reconcile_diff
+```
+
+### 分层组件
+
+```mermaid
+flowchart TD
+    subgraph API["api"]
+        A[OrderController / ReceiptController / ProductController]
+    end
+    subgraph APPL["application"]
+        B[OrderApplicationService 编排]
+        CR[OrderCreationService @Transactional]
+        D[StockService / OutboxService / Receipt* / Product*]
+        E[Tasks: OutboxRelay / StockTimeout / ReceiptReconcile / ReceiptTimeout]
+        P[ports: IdempotencyStore / StockCache / ProductCache]
+    end
+    subgraph DOM["domain"]
+        F[OrderStatus / OutboxStatus]
+    end
+    subgraph INF["infrastructure"]
+        G[MyBatis Mappers]
+        H[Redis*Store / Redis*Cache]
+        I[KafkaTopicConfig / OrderEventConsumer]
+    end
+    A --> B
+    B --> CR
+    B --> D
+    B --> P
+    CR --> G
+    D --> G
+    E --> CR
+    P -. 实现 .-> H
+    G --> MYSQL[(MySQL)]
+    H --> REDIS[(Redis)]
+    I --> KAFKA[(Kafka)]
+    D --> I
+```
+
+## 4. 设计取舍
+
+| 主题 | 取舍 | 理由 |
+| --- | --- | --- |
+| 幂等正确性 | Redis `SETNX` 仅作性能优化，`uk_idempotent_key` 唯一索引才是正确性保证 | Redis 可降级；DB 约束不丢 |
+| 库存扣减 | Redis Lua 闸门 + DB **条件原子更新**（`WHERE available >= ?`） | 高并发下不产生大量版本冲突误失败（优于 version 乐观锁） |
+| 订单号 | `yyyyMMddHHmmssSSS` + `AtomicLong` 序列（单机） | 兼顾可读性与唯一性；多实例可换 Snowflake |
+| 唯一约束冲突 | 捕获 `DuplicateKeyException` 后**主动查库**区分 `uk_order_no` / `uk_idempotent_key` | 不解析驱动异常消息；订单号碰撞可换号重试 |
+| 消息一致性 | 下单事务内同写 `t_order`+`t_outbox`，定时投递，替代 2PC | 无分布式事务依赖，最终一致 |
+| 投递语义 | 至少一次 + 消费端按 `orderNo` 幂等 | 收敛为「恰好一次」效果 |
+| 事务边界 | 编排层非事务 + 落单层独立 `@Transactional` | 规避重试时 `rollback-only` / `UnexpectedRollbackException` |
+| 缓存一致性 | cache-aside：先更库再删缓存 + 空值缓存 + TTL 随机 | 兼顾一致性、穿透/雪崩防护 |
+| 上游模拟 | 消费者直调应用服务，另暴露 `POST /api/receipts` | 简化回环，接口仍可供外部上游调用 |
+
+## 5. 我实现了什么
+
+- **高并发下单与防超卖**：Redis Lua 原子预扣 + DB 条件扣减兜底，单机 100 并发压测 **0 超卖**、5000 请求 **0 错误**（见 [D12 压测复盘](docs/D12压测复盘.md)）。
+- **幂等与一致性**：`x-idempotency-key` 幂等（Redis SETNX + DB 唯一索引兜底）；通过主动查库区分唯一约束，修复高并发下 0.04% 的订单号碰撞误判。
+- **可靠消息最终一致性**：以 Outbox 替代 2PC，定时轮询投递 Kafka + 消费幂等 + 回执对账，实现订单与回执最终一致。
+- **缓存治理**：Cache-Aside + 随机 TTL 防雪崩 + 空值缓存防穿透 + 先更库再删缓存。
+- **架构分层与事务边界**：编排层（非事务）与落单层（独立事务）分离，从架构上规避 `@Transactional` 重试导致的 `UnexpectedRollbackException`。
+
+## 6. 数据库设计
 
 | 表 | 关键字段 | 关键索引 |
 | --- | --- | --- |
@@ -48,7 +141,28 @@ common (统一响应 / 错误码 / 工具)
 
 建表与种子数据见 [`sql/init.sql`](sql/init.sql)。
 
-## 5. 启动步骤
+## 7. 快速导航
+
+| 内容 | 位置 |
+| --- | --- |
+| 10 分钟演示讲稿 | [`docs/DEMO.md`](docs/DEMO.md) |
+| 一键演示脚本 | [`scripts/demo.ps1`](scripts/demo.ps1) |
+| 端到端回归 | [`scripts/e2e-test.ps1`](scripts/e2e-test.ps1) |
+| 故障注入（Redis/Kafka/MySQL 宕机、进程崩溃） | [`scripts/chaos-test.ps1`](scripts/chaos-test.ps1) |
+| 压测计划 | [`loadtest/order_load.jmx`](loadtest/order_load.jmx)（数据见 §11） |
+| 踩坑与问题记录 | [`docs/踩坑与问题记录.md`](docs/踩坑与问题记录.md) |
+| D12 压测复盘 | [`docs/D12压测复盘.md`](docs/D12压测复盘.md) |
+| 测试报告模板 | [`docs/测试报告模板.md`](docs/测试报告模板.md) |
+
+### 踩坑精选（详情见 docs/）
+
+- **H2 中文种子乱码**：Windows 上 Spring `spring.sql.init` 默认按平台编码(GBK)读 `schema.sql`，显式 `spring.sql.init.encoding: UTF-8` 解决。
+- **订单号碰撞误判**：秒级时间戳+随机在 ~170 单/秒发生生日碰撞，且 `DuplicateKeyException` 被误当幂等冲突 → 改毫秒时间戳+序列，并主动查库区分唯一约束（见 [D12 压测复盘](docs/D12压测复盘.md)）。
+- **预热与回补竞态**：启动预热与超时回补并发写 Redis，旧值可能覆盖回补 → 定时任务首次执行延迟一个周期。
+- **失败路径回补不一致**：对账失败(FAILED)与超时失败的回补行为需一致，否则破坏库存守恒不变量（见 [踩坑与问题记录](docs/踩坑与问题记录.md)）。
+- **200 并发首连偶发异常**：客户端连接池 + `localhost` 双栈竞态 → 改用 `127.0.0.1` 并对幂等接口安全重试。
+
+## 8. 启动步骤
 
 前置：JDK 17、Maven 3.9+、Docker Desktop。
 
@@ -180,7 +294,7 @@ curl -X PUT http://localhost:8080/api/products/P1001 \
 | Redis | 6379 | |
 | Kafka | 9092 | |
 
-## 6. 目录结构
+## 9. 目录结构
 
 ```
 trading-order-service/
@@ -210,12 +324,15 @@ trading-order-service/
     common/ApiResponse.java  common/ErrorCode.java  common/exception/{GlobalExceptionHandler,BusinessException}.java
   src/main/resources/
     application.yml  application-local.yml  mapper/*.xml  lua/stock_deduct.lua
-  src/test/...                   # 上下文加载 + 单元测试 + 接口集成测试
+  src/test/...                   # 单测 + 集成测试（H2）；perf/OrderConcurrencyLocalIT 本地并发
+  docs/                          # DEMO.md / 踩坑与问题记录.md / D12压测复盘.md / 测试报告模板.md
+  scripts/                       # demo.ps1 / e2e-test.ps1 / chaos-test.ps1 / reset-data.sql / consistency-check.sql
+  loadtest/order_load.jmx        # JMeter 压测计划
 ```
 
-## 7. 进度清单
+## 10. 进度清单
 
-### D1–D12 已完成
+### D1–D13 已完成
 - [x] Maven 工程骨架（Spring Boot 3.2.5 + Java 17，UTF-8）
 - [x] 五层目录结构（api/application/domain/infrastructure/common）
 - [x] `application.yml` / `application-local.yml`（MySQL 3307、Redis 6379、Kafka 9092）
@@ -237,12 +354,13 @@ trading-order-service/
 - [x] **D10** 缓存治理：商品 cache-aside + 空值缓存防穿透 + TTL 随机化防雪崩 + 先更库再删缓存
 - [x] **D11** 异常路径测试：库存不足/重复请求/投递失败/重复回执/非法 JSON/全局异常码映射
 - [x] **D12** 压测（JMeter）：并发下单 + 不超卖验证；发现并修复订单号碰撞 bug；Hikari 连接池调优复测
+- [x] **D13** 文档完善：README 架构图（Mermaid）/设计取舍/我实现了什么/快速导航；演示讲稿与一键演示脚本
 - [x] 测试：单测 + H2 全链路集成测试（含 outbox 落库、回执幂等、对账、超时、缓存、异常路径、Mapper 边界）
 
-### D13+ 待做
-- [ ] D13 架构图与设计取舍；D14 上传 GitHub
+### D14 待做
+- [ ] D14 上传 GitHub 收尾 + 更新简历（项目经历/链接）
 
-## 8. 压测数据（D12）
+## 11. 压测数据（D12）
 
 > 工具：Apache JMeter 5.6.3（非 GUI）；压测计划见 [`loadtest/order_load.jmx`](loadtest/order_load.jmx)。
 > 环境：**单机压测，JMeter 与被测应用共享同一台机器 CPU**，MySQL/Redis/Kafka 亦同机容器；数据为本地演示参考，非生产基准。
@@ -280,6 +398,6 @@ trading-order-service/
 
 > 结论：`QPS ≈ 并发 / 平均延迟`（Little's Law）。Hikari 10→30 主要改善尾延迟（P99 907→809ms）；QPS 未显著提升说明瓶颈更可能在单机 CPU 与端到端 SQL 往返，可作后续调优方向（减少状态 UPDATE、合批/异步化）。
 
-## 9. 明确不做
+## 12. 明确不做
 
 分库分表、Elasticsearch、微服务拆分、Spring Cloud 全家桶（面试口述，不写代码）。

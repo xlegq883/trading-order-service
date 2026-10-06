@@ -2,8 +2,8 @@
 
 > 作者：xlegq883 · GitHub: https://github.com/xlegq883/trading-order-service
 
-这是我的个人作品集项目（**非生产系统**）。我想让它能跑、能压测、能演示、能讲清——
-面试时不只「我说做过」，而是「你看代码」。当前进度：**D1–D13 完成**。
+这是一个**个人练手项目**（**非生产系统**），用于实践并跑通一条完整的交易下单链路：
+能编译、能启动、能压测、能演示。当前进度：**D1–D13 完成**。
 
 ```
 api ──▶ application ──▶ domain ──▶ infrastructure ──▶ MySQL / Redis / Kafka
@@ -12,11 +12,11 @@ api ──▶ application ──▶ domain ──▶ infrastructure ──▶ My
 
 ## 1. 定位
 
-我围绕交易下单这条线，实现了幂等、库存防超卖、Outbox 最终一致性、缓存治理，
-覆盖高并发下单的核心考点，也方便面试时被追问。
+我围绕交易下单这条线，实践了幂等、库存防超卖、Outbox 最终一致性、缓存治理，
+覆盖高并发下单的几个核心问题。
 
 我早期写过一版偏 Go/gRPC 的设计草稿，最终决定用 **Java 17 + Spring Boot 3 + REST** 落地，
-并按照自己的两周计划推进。
+并按自己的两周计划推进。
 
 ## 2. 技术栈
 
@@ -124,7 +124,7 @@ flowchart TD
 | 缓存一致性 | cache-aside：先更库再删缓存 + 空值缓存 + TTL 随机 | 兼顾一致性、穿透/雪崩防护 |
 | 上游模拟 | 消费者直调应用服务，另暴露 `POST /api/receipts` | 简化回环，接口仍可供外部上游调用 |
 
-## 5. 我实现了什么
+## 5. 主要功能
 
 - **高并发下单与防超卖**：Redis Lua 原子预扣 + DB 条件扣减兜底，单机 100 并发压测 **0 超卖**、5000 请求 **0 错误**（见 [D12 压测复盘](docs/D12压测复盘.md)）。
 - **幂等与一致性**：`x-idempotency-key` 幂等（Redis SETNX + DB 唯一索引兜底）；通过主动查库区分唯一约束，修复高并发下 0.04% 的订单号碰撞误判。
@@ -149,7 +149,7 @@ flowchart TD
 
 | 内容 | 位置 |
 | --- | --- |
-| 10 分钟演示讲稿 | [`docs/DEMO.md`](docs/DEMO.md) |
+| 演示指南 | [`docs/DEMO.md`](docs/DEMO.md) |
 | 一键演示脚本 | [`scripts/demo.ps1`](scripts/demo.ps1) |
 | 端到端回归 | [`scripts/e2e-test.ps1`](scripts/e2e-test.ps1) |
 | 故障注入（Redis/Kafka/MySQL 宕机、进程崩溃） | [`scripts/chaos-test.ps1`](scripts/chaos-test.ps1) |
@@ -253,7 +253,7 @@ curl -X POST http://localhost:8080/api/orders \
   2. 发送成功但 `markSent` 前进程崩溃 → 恢复后再次投递。
   - 结论：投递是「至少一次」，需**消费端按业务唯一 id（orderNo）幂等**收敛为「恰好一次」（D8）。
 - **多实例扫描局限**：单实例用 `selectPending`；多实例可 `SELECT ... FOR UPDATE SKIP LOCKED` 或按 id 分片。
-- **面试口径**：本地事务写 `t_order`+`t_outbox` 解决「DB 与消息一致性」；退避与上限防雪崩；至少一次 + 消费幂等 = 恰好一次。
+- **小结**：本地事务写 `t_order`+`t_outbox` 解决「DB 与消息一致性」；退避与上限防雪崩；至少一次 + 消费幂等 = 恰好一次。
 
 #### Kafka 消费者与回执（D8）
 
@@ -360,11 +360,11 @@ trading-order-service/
 - [x] **D10** 缓存治理：商品 cache-aside + 空值缓存防穿透 + TTL 随机化防雪崩 + 先更库再删缓存
 - [x] **D11** 异常路径测试：库存不足/重复请求/投递失败/重复回执/非法 JSON/全局异常码映射
 - [x] **D12** 压测（JMeter）：并发下单 + 不超卖验证；发现并修复订单号碰撞 bug；Hikari 连接池调优复测
-- [x] **D13** 文档完善：README 架构图（Mermaid）/设计取舍/我实现了什么/快速导航；演示讲稿与一键演示脚本
+- [x] **D13** 文档完善：README 架构图（Mermaid）/设计取舍/主要功能/快速导航；演示指南与一键演示脚本
 - [x] 测试：单测 + H2 全链路集成测试（含 outbox 落库、回执幂等、对账、超时、缓存、异常路径、Mapper 边界）
 
 ### D14 待做
-- [ ] D14 上传 GitHub 收尾 + 更新简历（项目经历/链接）
+- [ ] D14 仓库收尾与文档完善
 
 ## 11. 压测数据（D12）
 

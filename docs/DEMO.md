@@ -1,15 +1,15 @@
-# 10 分钟演示讲稿（DEMO）
+# 演示指南（DEMO）
 
-> 面向面试/答辩：**照着念即可**。每步给出「命令 + 一句话讲稿 + 预期输出」。
-> 一键版：`pwsh -File scripts/demo.ps1`（自动按序执行，现场只需运行它并对照本文讲解）。
+> 面向本地演示：**照着执行即可**。每步给出「命令 + 一句话说明 + 预期输出」。
+> 一键版：`pwsh -File scripts/demo.ps1`（自动按序执行，运行它并对照本文即可）。
 > 依赖：`docker compose up -d` 起 MySQL(3307)/Redis(6379)/Kafka(9092)；应用启动在 8080。
 
 ---
 
-## 0. 开场（30s）· 讲定位
+## 0. 开场（30s）· 项目定位
 
-> “这是一个个人作品集项目 trading-order-service，用 Java 17 + Spring Boot 3 复刻交易下单链路，
-> 覆盖高并发下单、幂等、防超卖、Outbox 最终一致性、缓存治理。它是可运行、可压测、可演示的，不是 PPT。”
+> “这是一个个人练手项目 trading-order-service，用 Java 17 + Spring Boot 3 跑通一条交易下单链路，
+> 覆盖高并发下单、幂等、防超卖、Outbox 最终一致性、缓存治理；可运行、可压测、可演示。”
 
 ---
 
@@ -21,7 +21,7 @@ docker compose ps
 curl http://localhost:8080/api/health
 ```
 
-**讲**：“MySQL/Redis/Kafka 一键起；`/api/health` 不依赖任何中间件，依赖未起也能 200（数据源 `initialization-fail-timeout=-1`、Redis/Kafka 懒连接）。”
+**说明**：“MySQL/Redis/Kafka 一键起；`/api/health` 不依赖任何中间件，依赖未起也能 200（数据源 `initialization-fail-timeout=-1`、Redis/Kafka 懒连接）。”
 
 **预期**：`{"code":0,"message":"ok","data":{"status":"UP",...}}`
 
@@ -35,7 +35,7 @@ curl -X POST http://localhost:8080/api/orders `
   -d '{"userId":"U1","productId":"P1001","quantity":1}'
 ```
 
-**讲**：“校验 → Redis SETNX 幂等抢占 → Redis Lua 原子预扣 → 一个本地事务里落 `t_order` + 扣库存 + 写 `t_outbox`，状态 `INIT→STOCK_LOCKED→CREATED`。”
+**说明**：“校验 → Redis SETNX 幂等抢占 → Redis Lua 原子预扣 → 一个本地事务里落 `t_order` + 扣库存 + 写 `t_outbox`，状态 `INIT→STOCK_LOCKED→CREATED`。”
 
 **预期**：`{"code":0,...,"data":{"orderNo":"...","status":"CREATED"}}`
 
@@ -47,7 +47,7 @@ curl -X POST http://localhost:8080/api/orders `
 # 再发一次完全相同的请求（同 x-idempotency-key: demo-1）
 ```
 
-**讲**：“Redis 只是性能优化，`uk_idempotent_key` 唯一索引才是正确性保证；即使 Redis 挂了，第二次也会命中唯一索引返回首单。”
+**说明**：“Redis 只是性能优化，`uk_idempotent_key` 唯一索引才是正确性保证；即使 Redis 挂了，第二次也会命中唯一索引返回首单。”
 
 **预期**：两次 `orderNo` 相同；DB `t_order` 中该 key 仅 1 行。
 
@@ -61,7 +61,7 @@ curl -X POST http://localhost:8080/api/orders `
   -d '{"userId":"U1","productId":"P1001","quantity":1000000}'
 ```
 
-**讲**：“Redis Lua 预扣是并发闸门，DB `UPDATE ... WHERE available>=?` 是持久真相；不足返回 422，且库存不会被扣成负数。”
+**说明**：“Redis Lua 预扣是并发闸门，DB `UPDATE ... WHERE available>=?` 是持久真相；不足返回 422，且库存不会被扣成负数。”
 
 **预期**：`HTTP 422 {"code":422,"message":"库存不足: productId=P1001"}`
 
@@ -77,7 +77,7 @@ docker exec trading-mysql mysql -uroot -proot123 -N -e "USE trading; SELECT orde
 docker exec trading-mysql mysql -uroot -proot123 -N -e "USE trading; SELECT order_no,upstream_no,status FROM t_receipt ORDER BY id DESC LIMIT 3;"
 ```
 
-**讲**：“下单同事务写 Outbox；后台任务扫表投 Kafka（指数退避重试）；消费者模拟上游，按 `orderNo` 幂等落 `t_receipt`；对账任务比对后把订单推进到 `CONFIRMED`——这就是本地事务 + Outbox 的最终一致。”
+**说明**：“下单同事务写 Outbox；后台任务扫表投 Kafka（指数退避重试）；消费者模拟上游，按 `orderNo` 幂等落 `t_receipt`；对账任务比对后把订单推进到 `CONFIRMED`——这就是本地事务 + Outbox 的最终一致。”
 
 **预期**：outbox `status=1`；`t_receipt` 1 条；订单最终 `status=4(CONFIRMED)`。
 
@@ -93,7 +93,7 @@ curl -X POST http://localhost:8080/api/receipts -H "Content-Type: application/js
 docker exec trading-mysql mysql -uroot -proot123 -N -e "USE trading; SELECT order_no,diff_type FROM t_reconcile_diff ORDER BY id DESC LIMIT 3;"
 ```
 
-**讲**：“对账以本地 DB 为唯一事实来源；金额不一致会被判定 `AMOUNT_MISMATCH`、订单置 `FAILED`，并回补库存，差异落 `t_reconcile_diff`。”
+**说明**：“对账以本地 DB 为唯一事实来源；金额不一致会被判定 `AMOUNT_MISMATCH`、订单置 `FAILED`，并回补库存，差异落 `t_reconcile_diff`。”
 
 **预期**：订单 `status=9(FAILED)`，差异含 `AMOUNT_MISMATCH`。
 
@@ -111,7 +111,7 @@ curl -X PUT http://localhost:8080/api/products/P1001 -H "Content-Type: applicati
 docker exec trading-redis redis-cli EXISTS product:P1001   # 0 = 缓存已删
 ```
 
-**讲**：“Cache-Aside + 随机 TTL 防雪崩 + 空值缓存防穿透 + 先更库再删缓存；Redis 不可用自动降级直读 DB。”
+**说明**：“Cache-Aside + 随机 TTL 防雪崩 + 空值缓存防穿透 + 先更库再删缓存；Redis 不可用自动降级直读 DB。”
 
 ---
 
@@ -123,7 +123,7 @@ pwsh -File scripts/chaos-test.ps1        # 交互式，按提示 stop/start 容�
 pwsh -File scripts/e2e-test.ps1 -Reset
 ```
 
-**讲**：“Redis 宕机 → 靠 DB 唯一索引仍只落 1 单；Kafka 宕机 → 下单照常、消息留在 Outbox、恢复后自动补投；MySQL 宕机 → 下单失败但健康检查仍 200。”
+**说明**：“Redis 宕机 → 靠 DB 唯一索引仍只落 1 单；Kafka 宕机 → 下单照常、消息留在 Outbox、恢复后自动补投；MySQL 宕机 → 下单失败但健康检查仍 200。”
 
 ---
 
@@ -134,9 +134,9 @@ pwsh -File scripts/e2e-test.ps1 -Reset
 
 ---
 
-## 10. 收尾（30s）· 讲取舍与边界
+## 10. 收尾（30s）· 取舍与边界
 
-> “明确不做：分库分表、ES、微服务拆分；这些留在口述。项目的价值在**每个取舍都能对应到代码**。”
+> “明确不做：分库分表、ES、微服务拆分。项目的取舍都对应到具体代码。”
 
 ---
 

@@ -3,7 +3,7 @@
 > 作者：xlegq883 · GitHub: https://github.com/xlegq883/trading-order-service
 
 这是一个**个人练手项目**（**非生产系统**），用于实践并跑通一条完整的交易下单链路：
-能编译、能启动、能压测、能演示。当前进度：**D1–D13 完成**。
+能编译、能启动、能压测、能演示。
 
 ```
 api ──▶ application ──▶ domain ──▶ infrastructure ──▶ MySQL / Redis / Kafka
@@ -15,8 +15,7 @@ api ──▶ application ──▶ domain ──▶ infrastructure ──▶ My
 我围绕交易下单这条线，实践了幂等、库存防超卖、Outbox 最终一致性、缓存治理，
 覆盖高并发下单的几个核心问题。
 
-我早期写过一版偏 Go/gRPC 的设计草稿，最终决定用 **Java 17 + Spring Boot 3 + REST** 落地，
-并按自己的两周计划推进。
+我早期写过一版偏 Go/gRPC 的设计草稿，最终决定用 **Java 17 + Spring Boot 3 + REST** 落地。
 
 ## 2. 技术栈
 
@@ -126,7 +125,7 @@ flowchart TD
 
 ## 5. 主要功能
 
-- **高并发下单与防超卖**：Redis Lua 原子预扣 + DB 条件扣减兜底，单机 100 并发压测 **0 超卖**、5000 请求 **0 错误**（见 [D12 压测复盘](docs/D12压测复盘.md)）。
+- **高并发下单与防超卖**：Redis Lua 原子预扣 + DB 条件扣减兜底，单机 100 并发压测 **0 超卖**、5000 请求 **0 错误**（见 [压测复盘](docs/压测复盘.md)）。
 - **幂等与一致性**：`x-idempotency-key` 幂等（Redis SETNX + DB 唯一索引兜底）；通过主动查库区分唯一约束，修复高并发下 0.04% 的订单号碰撞误判。
 - **可靠消息最终一致性**：以 Outbox 替代 2PC，定时轮询投递 Kafka + 消费幂等 + 回执对账，实现订单与回执最终一致。
 - **缓存治理**：Cache-Aside + 随机 TTL 防雪崩 + 空值缓存防穿透 + 先更库再删缓存。
@@ -153,15 +152,15 @@ flowchart TD
 | 一键演示脚本 | [`scripts/demo.ps1`](scripts/demo.ps1) |
 | 端到端回归 | [`scripts/e2e-test.ps1`](scripts/e2e-test.ps1) |
 | 故障注入（Redis/Kafka/MySQL 宕机、进程崩溃） | [`scripts/chaos-test.ps1`](scripts/chaos-test.ps1) |
-| 压测计划 | [`loadtest/order_load.jmx`](loadtest/order_load.jmx)（数据见 §11） |
+| 压测计划 | [`loadtest/order_load.jmx`](loadtest/order_load.jmx)（数据见 §10） |
 | 踩坑与问题记录 | [`docs/踩坑与问题记录.md`](docs/踩坑与问题记录.md) |
-| D12 压测复盘 | [`docs/D12压测复盘.md`](docs/D12压测复盘.md) |
+| 压测复盘 | [`docs/压测复盘.md`](docs/压测复盘.md) |
 | 测试报告模板 | [`docs/测试报告模板.md`](docs/测试报告模板.md) |
 
 ### 我踩过的坑（详情见 docs/）
 
 - **H2 中文种子乱码**：Windows 上 Spring `spring.sql.init` 默认按平台编码(GBK)读 `schema.sql`；我显式设成 `spring.sql.init.encoding: UTF-8` 解决。
-- **订单号碰撞误判**：秒级时间戳+随机在 ~170 单/秒发生生日碰撞，且 `DuplicateKeyException` 被误当幂等冲突；我改成毫秒时间戳+序列，并主动查库区分唯一约束（见 [D12 压测复盘](docs/D12压测复盘.md)）。
+- **订单号碰撞误判**：秒级时间戳+随机在 ~170 单/秒发生生日碰撞，且 `DuplicateKeyException` 被误当幂等冲突；我改成毫秒时间戳+序列，并主动查库区分唯一约束（见 [压测复盘](docs/压测复盘.md)）。
 - **预热与回补竞态**：启动预热与超时回补会并发写 Redis，旧值可能覆盖回补；我给定时任务首次执行加了一个周期延迟。
 - **失败路径回补不一致**：对账失败(FAILED)与超时失败的回补行为需一致，否则破坏库存守恒不变量；我把两条路径对齐（见 [踩坑与问题记录](docs/踩坑与问题记录.md)）。
 - **200 并发首连偶发异常**：客户端连接池 + `localhost` 双栈竞态；我改用 `127.0.0.1` 并对幂等接口安全重试。
@@ -196,7 +195,7 @@ curl http://localhost:8080/api/health
 > 说明：MySQL / Redis / Kafka 未启动时应用**仍可正常启动**，`/api/health` 仍返回 200
 > （数据源设置了 `initialization-fail-timeout: -1`，Redis/Kafka 为懒连接）。
 
-### 下单接口（D3–D5）
+### 下单接口
 
 ```bash
 curl -X POST http://localhost:8080/api/orders \
@@ -221,14 +220,14 @@ curl -X POST http://localhost:8080/api/orders \
 {"code":422,"message":"库存不足: productId=P1001","data":null}
 ```
 
-#### 幂等（D4）
+#### 幂等
 
 - 我把幂等键放在请求头 `x-idempotency-key`。
 - 服务先用 Redis `SET key value NX EX 86400`（24h）抢占；命中则返回首单；最后由 `t_order.uk_idempotent_key` 唯一索引兜底。
 - 我的结论是：**Redis 只是性能优化，DB 唯一约束才是正确性保证**；Redis 不可用时自动降级，仅靠唯一索引仍只落 1 单。
 - 相同 key 重复调用返回**同一个 orderNo**；同 key 首单仍在处理中时返回 HTTP 409。
 
-#### 库存（D5）
+#### 库存
 
 - 我在启动时把 `t_stock` 预热进 Redis（`stock:{productId}`）。
 - 下单时：服务先做 Redis **Lua 原子「检查+扣减」**（并发闸门），再由 DB `UPDATE ... WHERE available >= ?` 作为持久真相，状态机 `INIT → STOCK_LOCKED → CREATED`。
@@ -237,25 +236,25 @@ curl -X POST http://localhost:8080/api/orders \
 - 超时回补：定时任务扫描长时间停留 `STOCK_LOCKED` 的订单（`app.stock.lock-timeout`，默认 15 分钟）→ 回补 DB+Redis 库存并置 `FAILED`。
 - 踩坑：预热与超时任务会并发写 Redis。我给定时任务首次执行延迟一个周期（`initialDelayString`），确保预热先完成，避免旧值覆盖回补结果。
 
-#### Outbox 可靠投递（D6）
+#### Outbox 可靠投递
 
 - 我把 `t_order` 与 `t_outbox` 放在**同一个本地事务**里写（保证「订单落库 ⇔ 消息待投递」）。
 - 后台任务 `OutboxRelayTask` 按 `idx_status_next(status, next_retry_at)` 扫描待发送消息，投递 Kafka（topic `trading.order.events`，key=orderNo 保证同单有序）。
 - 失败按**指数退避**重试：`delay = min(5s × 2^(retry-1), 5min)`；达到 `max-retries`(默认 5) 置 `FAILED` 并打 ERROR 日志。
-- 语义「至少一次」，消费端幂等（D8）达到「恰好一次」效果；Kafka 不可用不影响下单。
+- 语义「至少一次」，消费端幂等达到「恰好一次」效果；Kafka 不可用不影响下单。
 - 配置见 `application.yml` 的 `app.outbox.*`；测试环境用 `app.outbox.relay-enabled=false` 关闭定时投递。
 
-#### Outbox 异常路径与投递语义（D7 缓冲日）
+#### Outbox 异常路径与投递语义
 
 - **状态机**：`PENDING(0)` —— 投递成功 → `SENT(1)`；失败未达上限 → `reschedule` 保持 `PENDING`（更新 `retry_count`/`next_retry_at`）；达上限 → `FAILED(2)`，之后不再被 `selectPending` 选中。
 - **重复投递（at-least-once）来源**：
-  1. Kafka 不可用时 producer 会缓冲记录，恢复后投出；而 relay 因 `get()` 超时判定失败并重试 → 同一消息可能多次投出（D6 实测重复 4 次）。
+  1. Kafka 不可用时 producer 会缓冲记录，恢复后投出；而 relay 因 `get()` 超时判定失败并重试 → 同一消息可能多次投出（实测重复 4 次）。
   2. 发送成功但 `markSent` 前进程崩溃 → 恢复后再次投递。
-  - 结论：投递是「至少一次」，需**消费端按业务唯一 id（orderNo）幂等**收敛为「恰好一次」（D8）。
+  - 结论：投递是「至少一次」，需**消费端按业务唯一 id（orderNo）幂等**收敛为「恰好一次」。
 - **多实例扫描局限**：单实例用 `selectPending`；多实例可 `SELECT ... FOR UPDATE SKIP LOCKED` 或按 id 分片。
 - **小结**：本地事务写 `t_order`+`t_outbox` 解决「DB 与消息一致性」；退避与上限防雪崩；至少一次 + 消费幂等 = 恰好一次。
 
-#### Kafka 消费者与回执（D8）
+#### Kafka 消费者与回执
 
 - `OrderEventConsumer` 监听 `trading.order.events`（group `trading-order-service`），模拟上游消费。
 - 消费幂等：以业务唯一键 `orderNo` 为准，先查 `t_receipt`，命中直接返回；`uk_receipt_order_no` 唯一索引兜底并发/重复。
@@ -263,7 +262,7 @@ curl -X POST http://localhost:8080/api/orders \
 - 我另对外提供 `POST /api/receipts` 回执接口（`{orderNo, upstreamNo, status}`）；消费者内部直调同一应用服务。
 - 处理失败抛异常，交给 Spring Kafka 默认错误处理器重试（配合幂等最终一致）。
 
-#### 回执对账与最终一致（D9）
+#### 回执对账与最终一致
 
 - `ReceiptReconcileTask` 扫描 `REPORTED` 且有回执的订单，比对 `receipt.status`（1 成功）与 `receipt.amount` vs 订单 `amount`：
   - 一致 → 订单 `CONFIRMED`；
@@ -273,7 +272,7 @@ curl -X POST http://localhost:8080/api/orders \
 - 迟到回执：订单已被置 `FAILED` 时，`handleReceipt` 只记 `LATE_RECEIPT` 差异，不回退状态。
 - 差异记录在 `t_reconcile_diff`；本地 DB 为唯一事实来源，最终状态 `CREATED → REPORTED → CONFIRMED / FAILED`。
 
-#### 缓存治理（D10）
+#### 缓存治理
 
 - `GET /api/products/{productId}`：**cache-aside**，先查 Redis(`product:{id}`)，miss 回源 `t_product` 并写缓存。
 - **防穿透**：商品不存在时写空值标记 `__NULL__`（TTL `app.product.null-cache-ttl`，默认 30s），后续直接返回 404 不再查库。
@@ -329,44 +328,12 @@ trading-order-service/
   src/main/resources/
     application.yml  application-local.yml  mapper/*.xml  lua/stock_deduct.lua
   src/test/...                   # 单测 + 集成测试（H2）；perf/OrderConcurrencyLocalIT 本地并发
-  docs/                          # DEMO.md / 踩坑与问题记录.md / D12压测复盘.md / 测试报告模板.md
+  docs/                          # DEMO.md / 踩坑与问题记录.md / 压测复盘.md / 测试报告模板.md
   scripts/                       # demo.ps1 / e2e-test.ps1 / chaos-test.ps1 / reset-data.sql / consistency-check.sql
   loadtest/order_load.jmx        # JMeter 压测计划
 ```
 
-## 10. 进度清单
-
-我按自己的两周计划推进，已完成：
-
-### D1–D13 已完成
-- [x] Maven 工程骨架（Spring Boot 3.2.5 + Java 17，UTF-8）
-- [x] 五层目录结构（api/application/domain/infrastructure/common）
-- [x] `application.yml` / `application-local.yml`（MySQL 3307、Redis 6379、Kafka 9092）
-- [x] `docker-compose.yml`：MySQL 8 / Redis 7 / Kafka 3.7（KRaft），含 healthcheck 与数据卷
-- [x] `sql/init.sql`：4 张表 + 索引 + 2 条库存种子
-- [x] 4 个 DO + 4 个 MyBatis Mapper（基础方法）
-- [x] REST 健康检查 `GET /api/health`
-- [x] `.gitignore`、README
-- [x] **D3** 下单主链路 `POST /api/orders`：Jakarta 校验 → 落单 → 状态机
-- [x] 统一错误结构 `GlobalExceptionHandler`（校验失败 HTTP 400 + `ApiResponse`）
-- [x] **D4** 幂等：请求头 `x-idempotency-key` + Redis SETNX(24h) + `uk_idempotent_key` 兜底
-- [x] Redis 宕机自动降级，仅靠 DB 唯一索引仍只落 1 单
-- [x] **D5** 库存：Redis Lua 原子预扣 + DB 条件扣减兜底 + 超时回补
-- [x] 状态机接入 `INIT → STOCK_LOCKED → CREATED`；库存不足返回 422
-- [x] **D6** Outbox：下单同事务写 `t_outbox` + 定时投递 Kafka + 指数退避重试
-- [x] **D7** 缓冲日：补 Outbox 异常路径测试（扫描过滤/终态不重试/批内隔离）+ 文档
-- [x] **D8** Kafka 消费者（模拟上游）+ 回执接口：消费幂等（orderNo）+ 状态 `CREATED → REPORTED`
-- [x] **D9** 回执对账：比对 status/amount → `CONFIRMED`/`FAILED` + `t_reconcile_diff`；超时无回执回补库存
-- [x] **D10** 缓存治理：商品 cache-aside + 空值缓存防穿透 + TTL 随机化防雪崩 + 先更库再删缓存
-- [x] **D11** 异常路径测试：库存不足/重复请求/投递失败/重复回执/非法 JSON/全局异常码映射
-- [x] **D12** 压测（JMeter）：并发下单 + 不超卖验证；发现并修复订单号碰撞 bug；Hikari 连接池调优复测
-- [x] **D13** 文档完善：README 架构图（Mermaid）/设计取舍/主要功能/快速导航；演示指南与一键演示脚本
-- [x] 测试：单测 + H2 全链路集成测试（含 outbox 落库、回执幂等、对账、超时、缓存、异常路径、Mapper 边界）
-
-### D14 待做
-- [ ] D14 仓库收尾与文档完善
-
-## 11. 压测数据（D12）
+## 10. 压测数据
 
 下面是我用 JMeter 在本机压出的数据，仅作本地演示参考。
 
